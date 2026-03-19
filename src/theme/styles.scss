@@ -16,6 +16,11 @@
 @import './pages/dashboard';
 @import './pages/template.add.edit.banner';
 
+// Override Angular Material tab body wrapper to honour parent height
+.mat-tab-body-wrapper {
+	height: 100%;
+}
+
 .app-container {
 	min-height: 100vh;
 	background-size: cover;

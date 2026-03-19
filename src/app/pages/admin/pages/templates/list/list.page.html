@@ -211,6 +211,11 @@
 				<span class="spinner-border spinner-border-lg align-center"></span>
 			</td>
 		</tr>
+		<tr *ngIf="sortedData && sortedData.length === 0">
+			<td colspan="7" class="text-center">
+				No templates found.
+			</td>
+		</tr>
 	</tbody>
 	<tfoot>
 		<tr>

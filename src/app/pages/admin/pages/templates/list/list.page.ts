@@ -102,11 +102,11 @@ export class TemplatesListPage implements OnInit, OnDestroy {
 				(templates: Template[]) => {
 					////console.log('collection subscription:', templates);
 
-					this.allData = templates;
+					this.allData = Array.isArray(templates) ? templates : [];
 					////console.log("allData : ",this.allData);
 
-					if (templates !== undefined && templates.length > 0) {
-						this.initialise(templates);
+					if (Array.isArray(templates)) {
+						this.initialise(this.allData);
 
 						this.initialiseTextFilters();
 					}

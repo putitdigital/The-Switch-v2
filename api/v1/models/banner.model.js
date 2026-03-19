@@ -6,6 +6,9 @@ function model(sequelize) {
 	const attributes = {
 		name: { type: DataTypes.STRING, allowNull: false },
 		description: { type: DataTypes.STRING, allowNull: false },
+		websiteHtml: { type: DataTypes.TEXT('long'), allowNull: true },
+		websiteCss: { type: DataTypes.TEXT('long'), allowNull: true },
+		websiteJs: { type: DataTypes.TEXT('long'), allowNull: true },
 		status: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 		lastEditedBy: { type: DataTypes.INTEGER, allowNull: false }
 	};

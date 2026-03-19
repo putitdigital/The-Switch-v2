@@ -6,6 +6,7 @@ import { Component, ElementRef, EventEmitter, Inject, OnDestroy, OnInit, Output,
 import { FormBuilder, FormControl } from '@angular/forms';
 import { MatBottomSheet } from '@angular/material/bottom-sheet';
 import { MatDialog } from '@angular/material/dialog';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { MatDrawer } from '@angular/material/sidenav';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
@@ -13,7 +14,7 @@ import {
 	DialogBannerComponentAddComponent,
 	DialogBannerContainerAddComponent, DialogBannerContainerAnimationAddComponent, DialogBannerContainerEditComponent
 } from '@app/components';
-import { Account, BannerSize, BannerType, Client, FontType, Template } from '@app/core/models';
+import { Account, Banner, BannerSize, BannerType, Client, FontType, Template } from '@app/core/models';
 import { AccountService, AlertService, BannerService, BannerSizeService, BannerTypeService, ClientService, ComponentTypeService, ContainerService, FontTypeService, StateDataService, TemplateService } from '@app/core/services';
 /**/
 import * as timelineModule from 'animation-timeline-js';
@@ -112,6 +113,11 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	//client!: Client;
 	public template!: Template;
 	public account!: Account;
+	public websiteHtmlCode = '';
+	public websiteCssCode = '';
+	public websiteJsCode = '';
+	public websiteSaveInProgress = false;
+	public websitePreviewCollapsed = false;
 
 	// creative rendered and ready
 	private creativeReadySubject: BehaviorSubject<boolean | any>;
@@ -202,6 +208,7 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		private elementRef: ElementRef,
 		public breakpointObserver: BreakpointObserver,
 		private stateDataService: StateDataService,
+		private sanitizer: DomSanitizer,
 		@Inject(DOCUMENT) private document: Document
 	) {
 
@@ -367,6 +374,11 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 
 					this.template = x;
 
+					if (this.isWebsiteCreativeType()) {
+						this.loadWebsiteCodeFromBanner();
+						return;
+					}
+
 					this.initialiseDataBasedOnContainer();
 
 					this.listenToFormInputChanges();
@@ -400,6 +412,235 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			this.prepPageData(data);
 		});
 
+	}
+
+	private getActiveBanner(): Banner | undefined {
+		return this.template?.banners?.find((banner: any) => String(banner.id) === String(this.BannerId));
+	}
+
+	public isWebsiteCreativeType(): boolean {
+		const creativeTypeName = this.template?.bannertype?.name;
+
+		return typeof creativeTypeName === 'string' && creativeTypeName.toLowerCase().includes('website');
+	}
+
+	public updateWebsiteCode(type: 'html' | 'css' | 'js', value: string): void {
+		switch (type) {
+			case 'html':
+				this.websiteHtmlCode = value;
+				break;
+			case 'css':
+				this.websiteCssCode = value;
+				break;
+			case 'js':
+				this.websiteJsCode = value;
+				break;
+		}
+	}
+
+	public toggleWebsitePreview(): void {
+		this.websitePreviewCollapsed = !this.websitePreviewCollapsed;
+	}
+
+	public resetWebsiteCode(): void {
+		const templateName = this.template?.name || 'Website Creative';
+		const clientName = this.template?.client?.name || 'Client';
+
+		this.websiteHtmlCode = `<main class="website-creative">
+	  <section class="hero">
+	    <p class="eyebrow">${clientName}</p>
+	    <h1>${templateName}</h1>
+	    <p class="lede">Replace this starter markup with the website content you want to design for this template.</p>
+	    <a class="cta" href="#">Call to action</a>
+	  </section>
+	</main>`;
+
+		this.websiteCssCode = `:root {
+	  color-scheme: light;
+	  --bg: #f4efe8;
+	  --panel: #fffaf3;
+	  --text: #1c1b1a;
+	  --accent: #0f766e;
+	}
+
+	* {
+	  box-sizing: border-box;
+	}
+
+	body {
+	  margin: 0;
+	  font-family: Georgia, "Times New Roman", serif;
+	  background: linear-gradient(135deg, var(--bg), #e8ded2);
+	  color: var(--text);
+	}
+
+	.website-creative {
+	  min-height: 100vh;
+	  display: grid;
+	  place-items: center;
+	  padding: 48px 24px;
+	}
+
+	.hero {
+	  max-width: 720px;
+	  padding: 48px;
+	  border-radius: 24px;
+	  background: var(--panel);
+	  box-shadow: 0 24px 60px rgba(28, 27, 26, 0.12);
+	}
+
+	.eyebrow {
+	  margin: 0 0 12px;
+	  text-transform: uppercase;
+	  letter-spacing: 0.18em;
+	  font-size: 12px;
+	  color: var(--accent);
+	}
+
+	h1 {
+	  margin: 0;
+	  font-size: clamp(2.5rem, 6vw, 4.5rem);
+	}
+
+	.lede {
+	  font-size: 1.05rem;
+	  line-height: 1.7;
+	}
+
+	.cta {
+	  display: inline-block;
+	  margin-top: 16px;
+	  padding: 12px 18px;
+	  border-radius: 999px;
+	  background: var(--accent);
+	  color: #fff;
+	  text-decoration: none;
+	}`;
+
+		this.websiteJsCode = `const cta = document.querySelector('.cta');
+
+	if (cta) {
+	  cta.addEventListener('click', (event) => {
+	    event.preventDefault();
+	    window.alert('Attach your website action here.');
+	  });
+	}`;
+	}
+
+	private loadWebsiteCodeFromBanner(): void {
+		const activeBanner = this.getActiveBanner();
+
+		if (!activeBanner) {
+			this.resetWebsiteCode();
+			return;
+		}
+
+		if (activeBanner.websiteHtml || activeBanner.websiteCss || activeBanner.websiteJs) {
+			this.websiteHtmlCode = activeBanner.websiteHtml || '';
+			this.websiteCssCode = activeBanner.websiteCss || '';
+			this.websiteJsCode = activeBanner.websiteJs || '';
+			return;
+		}
+
+		this.resetWebsiteCode();
+	}
+
+	public saveWebsiteCode(): void {
+		const activeBanner = this.getActiveBanner();
+
+		if (!activeBanner) {
+			this.alertService.error('No active banner was found for saving website code.');
+			return;
+		}
+
+		this.websiteSaveInProgress = true;
+
+		this.bannerService.update(String(activeBanner.id), {
+			name: activeBanner.name,
+			description: activeBanner.description,
+			templateId: activeBanner.templateId,
+			bannertypeId: activeBanner.bannertypeId,
+			bannersizeId: activeBanner.bannersizeId,
+			websiteHtml: this.websiteHtmlCode,
+			websiteCss: this.websiteCssCode,
+			websiteJs: this.websiteJsCode,
+		})
+			.pipe(first())
+			.subscribe({
+				next: (updatedBanner: Banner) => {
+					activeBanner.websiteHtml = updatedBanner.websiteHtml || this.websiteHtmlCode;
+					activeBanner.websiteCss = updatedBanner.websiteCss || this.websiteCssCode;
+					activeBanner.websiteJs = updatedBanner.websiteJs || this.websiteJsCode;
+					this.websiteSaveInProgress = false;
+					this.alertService.success('Website code saved successfully.', { keepAfterRouteChange: true });
+				},
+				error: (error: string) => {
+					this.websiteSaveInProgress = false;
+					this.alertService.error(error);
+				}
+			});
+	}
+
+	private getPreviewBaseHref(): string {
+		return this.document?.baseURI || this.document?.location?.origin || '/';
+	}
+
+	private normalizeWebsiteHtml(html: string): string {
+		const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+
+		if (bodyMatch && bodyMatch[1]) {
+			return bodyMatch[1];
+		}
+
+		return html;
+	}
+
+	private extractWebsiteHead(html: string): string {
+		const headMatch = html.match(/<head[^>]*>([\s\S]*)<\/head>/i);
+
+		if (!headMatch || !headMatch[1]) {
+			return '';
+		}
+
+		return headMatch[1]
+			.replace(/<base[^>]*>/gi, '')
+			.replace(/<meta[^>]*charset[^>]*>/gi, '')
+			.replace(/<meta[^>]*name=["']viewport["'][^>]*>/gi, '');
+	}
+
+	private normalizeWebsiteCss(css: string): string {
+		return css
+			.replace(/<style[^>]*>/gi, '')
+			.replace(/<\/style>/gi, '');
+	}
+
+	private normalizeWebsiteJs(js: string): string {
+		return js
+			.replace(/<script[^>]*>/gi, '')
+			.replace(/<\/script>/gi, '');
+	}
+
+	public get websitePreviewDocument(): SafeHtml {
+		const head = this.extractWebsiteHead(this.websiteHtmlCode || '');
+		const html = this.normalizeWebsiteHtml(this.websiteHtmlCode || '');
+		const css = this.normalizeWebsiteCss(this.websiteCssCode || '');
+		const js = this.normalizeWebsiteJs(this.websiteJsCode || '');
+		const baseHref = this.getPreviewBaseHref();
+
+		return this.sanitizer.bypassSecurityTrustHtml(`<!doctype html>
+	<html lang="en">
+	<head>
+	  <meta charset="utf-8">
+	  <meta name="viewport" content="width=device-width, initial-scale=1">
+	  <base href="${baseHref}">
+	  ${head}
+	  <style>${css}</style>
+	</head>
+	<body>
+	  ${html}
+	  <script>${js}<\/script>
+	</body>
+	</html>`);
 	}
 
 	public creativeReady($event: any): void {

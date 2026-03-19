@@ -3,6 +3,9 @@ export class Banner {
 	id!: string;
 	name!: string;
 	description!: string;
+	websiteHtml!: string;
+	websiteCss!: string;
+	websiteJs!: string;
 	status!: boolean;
 	bannertypeId!: number;
 	bannertype!: any;

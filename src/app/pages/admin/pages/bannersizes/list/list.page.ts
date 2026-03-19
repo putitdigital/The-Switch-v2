@@ -98,13 +98,13 @@ export class BannerSizesListPage implements OnInit, OnDestroy {
 				(bannersizes: BannerSize[]) => {
 					////console.log('collection subscription:', bannersizes);
 
-					this.allData = bannersizes;
-
-					if (bannersizes !== undefined && bannersizes.length > 0) {
-						this.initialise(bannersizes);
-
-						this.initialiseTextFilters();
+					if (!Array.isArray(bannersizes)) {
+						return;
 					}
+
+					this.allData = bannersizes;
+					this.initialise(bannersizes);
+					this.initialiseTextFilters();
 				}
 			);
 

@@ -56,7 +56,10 @@ function createSchema(req, res, next) {
 		description: Joi.string().required(),
 		templateId: Joi.number().required(),
 		bannertypeId: Joi.number().required(),
-		bannersizeId: Joi.number().required()
+		bannersizeId: Joi.number().required(),
+		websiteHtml: Joi.string().allow('').optional(),
+		websiteCss: Joi.string().allow('').optional(),
+		websiteJs: Joi.string().allow('').optional()
     });
 	validateRequest(req, next, schema);
 }
@@ -73,7 +76,10 @@ function updateSchema(req, res, next) {
 		description: Joi.string().required(),
 		templateId: Joi.number().required(),
 		bannertypeId: Joi.number().required(),
-		bannersizeId: Joi.number().required()
+		bannersizeId: Joi.number().required(),
+		websiteHtml: Joi.string().allow('').optional(),
+		websiteCss: Joi.string().allow('').optional(),
+		websiteJs: Joi.string().allow('').optional()
 	});
     validateRequest(req, next, schemaRules);
 }

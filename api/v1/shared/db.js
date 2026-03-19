@@ -259,14 +259,9 @@ async function initialize() {
 	Temporal(db.AnimationMeta, sequelize);
 
 	// sync all models with database
-	await sequelize.sync();
-	/** /
 	await sequelize.sync({
 		alter: {
 			drop: false
 		}
-	}).catch(function(err){
-		//console.log(err);
 	});
-	/**/
 }

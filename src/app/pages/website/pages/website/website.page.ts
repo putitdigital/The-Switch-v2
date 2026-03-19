@@ -38,10 +38,14 @@ export interface Tile {
 
   export interface websiteTemplate {
 	id:string;
+	templateId?: string;
 	title: any;
 	subtitle: any;
 	image: string;
 	content: any;
+	websiteHtml?: string;
+	websiteCss?: string;
+	websiteJs?: string;
   }
   export interface DialogData {
 	animal: string;
@@ -84,128 +88,7 @@ export class WebsitePage implements OnInit, OnDestroy {
 	public websiteSelectedTemplate = false;
 	public websiteSelectedTemplateID!: any;
 
-	websiteTemplates: websiteTemplate[] = [
-		{
-			id: '0',
-			title: {
-				value:'Template 1',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			subtitle: {
-				value:'Template 1',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			image: 'https://material.angular.io/assets/img/examples/shiba2.jpg',
-			content: {
-				value:'The Shiba Inu is the smallest of the six original and distinct spitz breeds of dog from Japan.',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			}
-		},
-		{
-			id: '1',
-			title: {
-				value:'Template 2',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			subtitle: {
-				value:'Template 1',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			image: 'https://material.angular.io/assets/img/examples/shiba2.jpg',
-			content: {
-				value:'The Shiba Inu is the smallest of the six original and distinct spitz breeds of dog from Japan.',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-		},
-		{
-			id: '2',
-			title: {
-				value:'Template 3',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			subtitle: {
-				value:'Template 1',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			},
-			image: 'https://material.angular.io/assets/img/examples/shiba2.jpg',
-			content: {
-				value:'The Shiba Inu is the smallest of the six original and distinct spitz breeds of dog from Japan.',
-				x:2,
-				y:2,
-				z:2,
-				w:2,
-				color: '#000000',
-				background: '#000000',
-				fonts:'fonts',
-				fontType:2,
-				fontSize:2,
-			}
-		},
-	];
+	websiteTemplates: websiteTemplate[] = [];
 
 	// will use the _destroy$ observable to control
 	// fetching items from an observable
@@ -676,6 +559,61 @@ export class WebsitePage implements OnInit, OnDestroy {
 				})
 			);
 
+		this.websiteData$
+			.pipe(takeUntil(this._destroy$))
+			.subscribe((data: any) => {
+				this.prepWebsiteData(data);
+			});
+
+	}
+
+	private createWebsiteTemplateField(value: string): any {
+		return {
+			value,
+			x: 0,
+			y: 0,
+			z: 0,
+			w: 0,
+			color: '#000000',
+			background: '#ffffff',
+			fonts: 'fonts',
+			fontType: 0,
+			fontSize: 16,
+		};
+	}
+
+	private getTemplatePreviewImage(template: Template): string {
+		const firstBanner = template.banners?.find((banner: any) => banner?.status !== false);
+		const firstContainer = firstBanner?.containers?.[0];
+		const imageComponent = firstContainer?.components?.find((component: any) => component?.componenttype?.name === 'Image');
+		const imagePath = imageComponent?.componentmeta?.find((meta: any) => meta?.name === 'path')?.value;
+
+		return imagePath || 'https://material.angular.io/assets/img/examples/shiba2.jpg';
+	}
+
+	private mapTemplateToWebsiteTemplate(template: Template): websiteTemplate {
+		const firstBanner: any = template.banners?.find((b: any) => b?.status !== false);
+		return {
+			id: String(template.id),
+			templateId: String(template.id),
+			title: this.createWebsiteTemplateField(template.name),
+			subtitle: this.createWebsiteTemplateField(template.client?.name || template.bannertype?.name || 'Website Template'),
+			image: this.getTemplatePreviewImage(template),
+			content: this.createWebsiteTemplateField(template.description || 'Edit this template copy and replace the image from the website editor.'),
+			websiteHtml: firstBanner?.websiteHtml || '',
+			websiteCss: firstBanner?.websiteCss || '',
+			websiteJs: firstBanner?.websiteJs || '',
+		};
+	}
+
+	public buildPreviewDocument(t: websiteTemplate): string {
+		return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${t.websiteCss || ''}</style></head><body>${t.websiteHtml || ''}<script>${t.websiteJs || ''}<\/script></body></html>`;
+	}
+
+	private isWebsiteTemplate(template: Template): boolean {
+		const creativeTypeName = template?.bannertype?.name;
+
+		return typeof creativeTypeName === 'string' && creativeTypeName.toLowerCase().includes('website');
 	}
 	private updateContainer() {
 	
@@ -857,6 +795,9 @@ export class WebsitePage implements OnInit, OnDestroy {
 		this.BannerTypes = data.bannertypes;
 		this.BannerSizes = data.bannersizes;
 		this.Projects = data.projects;
+		this.websiteTemplates = this.Templates
+			.filter((template: Template) => template.status === true && template.deletedAt === null && this.isWebsiteTemplate(template))
+			.map((template: Template) => this.mapTemplateToWebsiteTemplate(template));
 
 		data.fonttypes.forEach((font: FontType) => {
 			if (!document.getElementById("font-custom-stylesheet-id-" + font.id)) {
@@ -883,25 +824,37 @@ export class WebsitePage implements OnInit, OnDestroy {
 		this.playGlobalAnimationSubject.next(this.animation_isPlaying);
 
 	}
-	public selectProperties(event: any): void {
-		console.log("selectProperties");
-		this.selectedFiles = event.target.value;
-		if (event.target.type === 'text') {
-			this.websiteTemplates[this.websiteSelectedTemplateID].title.value = this.selectedFiles;
-		}else if(event.target.type === 'textarea'){
-			this.websiteTemplates[this.websiteSelectedTemplateID].content.value = this.selectedFiles;
+
+	private getWebsiteTemplateById(id: any): websiteTemplate | undefined {
+		return this.websiteTemplates.find((template) => template.id === String(id));
+	}
+
+	public updateWebsiteField(field: 'title' | 'subtitle' | 'content', value: string): void {
+		if (!this.selectedTemplateData) {
+			return;
 		}
-	  }
+
+		this.selectedTemplateData[field].value = value;
+	}
+
+	public updateWebsiteImageUrl(value: string): void {
+		if (!this.selectedTemplateData) {
+			return;
+		}
+
+		this.selectedTemplateData.image = value;
+		this.preview = value;
+	}
+
 	public selectFile(event: any): void {
-		console.log("selectFile");
 		this.message = '';
 		this.preview = '';
 		this.progress = 0;
 		this.selectedFiles = event.target.files;
-		console.log(this.selectedFiles);
-		console.log(this.websiteTemplates[this.websiteSelectedTemplateID].image);
 
-		
+		if (!this.selectedTemplateData) {
+			return;
+		}
 	  
 		if (this.selectedFiles) {
 		  const file: File | null = this.selectedFiles.item(0);
@@ -913,9 +866,8 @@ export class WebsitePage implements OnInit, OnDestroy {
 			const reader = new FileReader();
 	  
 			reader.onload = (e: any) => {
-			  console.log(e.target.result);
 			  this.preview = e.target.result;
-			  this.websiteTemplates[this.websiteSelectedTemplateID].image = e.target.result;
+			  this.selectedTemplateData.image = e.target.result;
 			};
 	  
 			reader.readAsDataURL(this.currentFile);
@@ -923,8 +875,6 @@ export class WebsitePage implements OnInit, OnDestroy {
 		}
 	  }
 	public upload(): void {
-		console.log("Uploading");
-		console.log(event);
 		this.progress = 0;
 	  
 		if (this.selectedFiles) {
@@ -1039,32 +989,21 @@ export class WebsitePage implements OnInit, OnDestroy {
 		//}
 	}
 	public selectedTemplate(id: any){
+		const selectedTemplate = this.getWebsiteTemplateById(id);
 
-		
-		console.log(id);
-		this.websiteSelectedTemplateID = id;
-
-		if( id != null){
-			this.preview = this.websiteTemplates[this.websiteSelectedTemplateID].image ;
-			this.websiteSelectedTemplate = true;
-			this.selectedTemplateData = this.websiteTemplates[this.websiteSelectedTemplateID];
-			console.log('selectedTemplate');
-			console.log(this.selectedTemplateData.id );
-			
+		if (!selectedTemplate) {
+			return;
 		}
+
+		this.websiteSelectedTemplateID = selectedTemplate.id;
+		this.preview = selectedTemplate.image;
+		this.websiteSelectedTemplate = true;
+		this.selectedTemplateData = selectedTemplate;
 	}
 	public previewTemplate(id: any){
+		this.selectedTemplate(id);
 
-		
-		console.log(id);
-		this.websiteSelectedTemplateID = id;
-
-		if( id != null){
-			this.preview = this.websiteTemplates[this.websiteSelectedTemplateID].image ;
-			this.websiteSelectedTemplate = true;
-			this.selectedTemplateData = this.websiteTemplates[this.websiteSelectedTemplateID];
-			console.log('selectedTemplate');
-			console.log(this.selectedTemplateData.id );
+		if (this.selectedTemplateData) {
 			const dialogRef = this.dialog.open(PreviewDialog,
 				{
 					data: {name: this.selectedTemplateData, animal: this.websiteSelectedTemplateID},

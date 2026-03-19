@@ -15,104 +15,112 @@
 
 </mat-toolbar>
 
-<mat-stepper labelPosition="bottom" #stepper>
+<mat-stepper class="website-stepper" labelPosition="bottom" #stepper>
 	<mat-step [stepControl]="firstFormGroup">
 	  <form [formGroup]="firstFormGroup">
-		<ng-template matStepLabel>Select template</ng-template>
-		<mat-chip-list class="example-chip" cdkDropList cdkDropListOrientation="horizontal" (cdkDropListDropped)="drop($event)">
-			<mat-chip class="example-box" cdkDrag *ngFor="let websiteTemplate of websiteTemplates">
-				<div class="websiteTemplate" >
-					<div class="websiteTemplate-media" (click)="selectedTemplate(websiteTemplate.id)">
-						<img src={{websiteTemplate.image}} alt="">
+		<ng-template matStepLabel>Choose template</ng-template>
+		<div class="website-gallery-header">
+			<div>
+				<h2>Website Templates</h2>
+				<p>Preview a template, then select it to edit copy and replace images.</p>
+			</div>
+		</div>
+		<div class="website-template-grid" cdkDropList cdkDropListOrientation="horizontal" (cdkDropListDropped)="drop($event)">
+			<article class="website-template-card" cdkDrag *ngFor="let websiteTemplate of websiteTemplates">
+				<button type="button" class="website-template-card__preview" (click)="selectedTemplate(websiteTemplate.id)">
+					<iframe
+						*ngIf="websiteTemplate.websiteHtml"
+						class="website-template-card__iframe-preview"
+						title="{{websiteTemplate.title.value}} preview"
+						[attr.srcdoc]="buildPreviewDocument(websiteTemplate)"
+						scrolling="no"></iframe>
+					<img
+						*ngIf="!websiteTemplate.websiteHtml"
+						[src]="websiteTemplate.image"
+						[alt]="websiteTemplate.title.value">
+					<div class="website-template-card__overlay">
+						<h3>{{websiteTemplate.title.value}}</h3>
 						<p>{{websiteTemplate.content.value}}</p>
 					</div>
-
-					<div class="websiteTemplate-details">
-						{{websiteTemplate.title.value}}
+				</button>
+				<div class="website-template-card__body">
+					<div>
+						<strong>{{websiteTemplate.title.value}}</strong>
+						<p>{{websiteTemplate.subtitle.value}}</p>
 					</div>
-					<hr>
-					<div class="container">
-						<button mat-button (click)="previewTemplate(websiteTemplate.id)" >Preview</button>
-						<button *ngIf = "websiteSelectedTemplateID == websiteTemplate.id" mat-button matStepperNext>Next</button>
+					<div class="website-template-card__actions">
+						<button type="button" mat-stroked-button (click)="previewTemplate(websiteTemplate.id)">Preview</button>
+						<button type="button" mat-flat-button color="primary" (click)="selectedTemplate(websiteTemplate.id)" matStepperNext>Edit Template</button>
 					</div>
 				</div>
-			</mat-chip>
-
-		</mat-chip-list>
+			</article>
+		</div>
 	  </form>
 	</mat-step>
 	<mat-step [stepControl]="secondFormGroup">
 	  <form [formGroup]="secondFormGroup">
-		<ng-template matStepLabel>Design your website</ng-template>
-			<div *ngFor="let websiteTemplate of websiteTemplates">
-				<div *ngIf="websiteTemplate.id == websiteSelectedTemplateID">
+		<ng-template matStepLabel>Edit template</ng-template>
+		<ng-container *ngIf="selectedTemplateData as activeTemplate; else noWebsiteTemplateSelected">
+			<div class="website-editor">
+				<section class="website-editor__preview-card">
+					<div class="website-editor__preview-media">
+						<img [src]="activeTemplate.image" [alt]="activeTemplate.title.value">
+					</div>
+					<div class="website-editor__preview-copy">
+						<p class="website-editor__eyebrow">{{template?.client?.name || 'Website Template'}} • {{template?.bannertype?.name || 'Website'}}</p>
+						<h2>{{activeTemplate.title.value}}</h2>
+						<h3>{{activeTemplate.subtitle.value}}</h3>
+						<p>{{activeTemplate.content.value}}</p>
+					</div>
+				</section>
 
-					<div class="websiteTemplate">
-						<div class="websiteTemplate-media">
-							<img src={{websiteTemplate.image}} alt="">
-							<p>
-								{{websiteTemplate.content.value}}
-							</p>
-							
-						</div>
-						<div class="websiteTemplate-details">
-							{{websiteTemplate.title.value}}
-						</div>
+				<section class="website-editor__controls">
+					<div class="website-editor__section-heading">
+						<h2>Edit Content</h2>
+						<p>Update the website copy and image for the selected template.</p>
 					</div>
 
-					<div class="websiteTemplate">
-						<div class="header">Layers</div>
-						<hr>
-						<div class="col-4">
-							<button
-							  class="btn btn-success btn-sm float-right"
-							  [disabled]="!selectedFiles"
-							  (click)="upload()"
-							>
-							  Upload
-							</button>
-						</div>
-						  	<input type="file" accept="image/*" (change)="selectFile($event)" />
-						<hr>
-							<textarea (change)="selectProperties($event)" style="width: 390px;" matInput [value]=websiteTemplate.content.value></textarea>
-						<hr>
-						<div class="websiteTemplate-details">
-							<input (change)="selectProperties($event)" [value]=websiteTemplate.title.value type="text">
-						</div>
+					<div class="website-editor__field">
+						<label for="website-template-title">Headline</label>
+						<input id="website-template-title" type="text" [value]="activeTemplate.title.value" (input)="updateWebsiteField('title', $any($event.target).value)">
 					</div>
-					<div class="websiteTemplate">
-						<div class="properties">
-							<div class="header">Properties</div>
-								<hr>
-								<label>X : </label>
-								<input type="number" [value]="websiteTemplate.title.x">
-								<label>Y : </label>
-								<input type="number" [value]="websiteTemplate.title.y">
-								<h1></h1>
-								<label>Z : </label>
-								<input type="number" [value]="websiteTemplate.title.z">
-								<label>W : </label>
-								<input type="number" [value]="websiteTemplate.title.w">
-								<h1></h1>
-								<label>Color : </label>
-								<input type="text" [value]="websiteTemplate.title.color">
-								<h1></h1>
-								<label>Background : </label>
-								<input type="text" [value]="websiteTemplate.title.background">
-								<h1></h1>
-								<label>fonts : </label>
-								<input type="text" [value]="websiteTemplate.title.fonts">
-								<h1></h1>
-								<label>font Type : </label>
-								<input type="text" [value]="websiteTemplate.title.fontType">
-								<h1></h1>
-								<label>font Size : </label>
-								<input type="number" [value]="websiteTemplate.title.fontSize">
 
+					<div class="website-editor__field">
+						<label for="website-template-subtitle">Subheadline</label>
+						<input id="website-template-subtitle" type="text" [value]="activeTemplate.subtitle.value" (input)="updateWebsiteField('subtitle', $any($event.target).value)">
+					</div>
+
+					<div class="website-editor__field">
+						<label for="website-template-copy">Body Copy</label>
+						<textarea id="website-template-copy" rows="8" [value]="activeTemplate.content.value" (input)="updateWebsiteField('content', $any($event.target).value)"></textarea>
+					</div>
+
+					<div class="website-editor__field">
+						<label for="website-template-image-url">Image URL</label>
+						<input id="website-template-image-url" type="text" [value]="activeTemplate.image" (input)="updateWebsiteImageUrl($any($event.target).value)">
+					</div>
+
+					<div class="website-editor__field">
+						<label for="website-template-image-upload">Replace Image</label>
+						<input id="website-template-image-upload" type="file" accept="image/*" (change)="selectFile($event)">
+					</div>
+
+					<div class="website-editor__actions">
+						<button type="button" class="btn btn-outline-secondary" [disabled]="!selectedFiles" (click)="upload()">Upload Image</button>
+						<div class="website-editor__status" *ngIf="message || progress">
+							<span *ngIf="progress">Uploading {{progress}}%</span>
+							<span *ngIf="!progress && message">{{message}}</span>
 						</div>
 					</div>
-				</div>
+				</section>
 			</div>
+		</ng-container>
+		<ng-template #noWebsiteTemplateSelected>
+			<div class="website-editor website-editor--empty">
+				<h2>Select a template first</h2>
+				<p>Go back to the previous step, preview a template, and choose one to edit.</p>
+			</div>
+		</ng-template>
 
 		<div>
 		  <button mat-button matStepperPrevious>Back</button>

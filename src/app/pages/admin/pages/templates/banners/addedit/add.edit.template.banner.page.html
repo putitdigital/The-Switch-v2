@@ -2,7 +2,7 @@
 <mat-toolbar class="bapp-admin-toolbar">
 	<span class="toolbar-title">
 		<span *ngIf="isAddMode">Add Creative to Template</span>
-		<span *ngIf="!isAddMode && template">Edit Creative</span>
+		<span *ngIf="!isAddMode && template">Add Website Template</span>
 	</span>
 	<span class="example-spacer"></span>
 
@@ -16,7 +16,72 @@
 
 </mat-toolbar>
 
-<div class="row" *ngIf="activeBannerSizes">
+<div class="website-code-editor" *ngIf="isWebsiteCreativeType() && template">
+	<div class="website-code-editor__intro">
+		<div class="website-code-editor__title-inline">
+			<h2>{{template.name}}</h2>
+			<p>{{template.client.name}} • {{template.bannertype.name}}</p>
+		</div>
+		<div class="website-code-editor__intro-actions">
+			<button class="btn btn-secondary" (click)="resetWebsiteCode()">Reset Starter</button>
+			<button class="btn btn-outline-dark" (click)="toggleWebsitePreview()">
+				<span *ngIf="!websitePreviewCollapsed">Minimize Preview</span>
+				<span *ngIf="websitePreviewCollapsed">Expand Preview</span>
+			</button>
+			<button class="btn btn-primary" [disabled]="websiteSaveInProgress" (click)="saveWebsiteCode()">
+				<span *ngIf="!websiteSaveInProgress">Save Website Code</span>
+				<span *ngIf="websiteSaveInProgress" class="spinner-border spinner-border-sm"></span>
+			</button>
+		</div>
+	</div>
+
+	<div class="website-code-editor__layout" [ngClass]="{ 'website-code-editor__layout--preview-collapsed': websitePreviewCollapsed }">
+		<div class="website-code-editor__panels">
+			<mat-tab-group class="website-code-editor__tabs" animationDuration="0ms">
+				<mat-tab label="HTML">
+					<div class="website-code-editor__panel">
+						<textarea
+							id="website-html-editor"
+							class="website-code-editor__textarea"
+							[value]="websiteHtmlCode"
+							(input)="updateWebsiteCode('html', $any($event.target).value)"></textarea>
+					</div>
+				</mat-tab>
+
+				<mat-tab label="CSS">
+					<div class="website-code-editor__panel">
+						<textarea
+							id="website-css-editor"
+							class="website-code-editor__textarea"
+							[value]="websiteCssCode"
+							(input)="updateWebsiteCode('css', $any($event.target).value)"></textarea>
+					</div>
+				</mat-tab>
+
+				<mat-tab label="JavaScript">
+					<div class="website-code-editor__panel">
+						<textarea
+							id="website-js-editor"
+							class="website-code-editor__textarea website-code-editor__textarea--compact"
+							[value]="websiteJsCode"
+							(input)="updateWebsiteCode('js', $any($event.target).value)"></textarea>
+					</div>
+				</mat-tab>
+			</mat-tab-group>
+		</div>
+
+		<div class="website-code-editor__preview" *ngIf="!websitePreviewCollapsed">
+			<div class="website-code-editor__preview-header">Live Preview</div>
+			<iframe
+				class="website-code-editor__iframe"
+				title="Website creative preview"
+				[srcdoc]="websitePreviewDocument">
+			</iframe>
+		</div>
+	</div>
+</div>
+
+<div class="row" *ngIf="!isWebsiteCreativeType() && activeBannerSizes">
 	<div class="col-12">
 
 		<form class="form-model-edit">

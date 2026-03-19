@@ -509,6 +509,6 @@ async function getHistoryById(id) {
 }
 
 function basicDetails(model) {
-	const { id, name, description, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId } = model;
-	return { id, name, description, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId };
+	const { id, name, description, websiteHtml, websiteCss, websiteJs, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId } = model;
+	return { id, name, description, websiteHtml, websiteCss, websiteJs, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId };
 }
