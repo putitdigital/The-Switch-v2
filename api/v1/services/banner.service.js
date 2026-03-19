@@ -138,16 +138,26 @@ async function create(params, editId) {
 	//	throw 'Banner already exists. Please provide a unique Name and description.';
 	//}
 
-    const model = new db.Banner(params);
+	const websiteFilesInput = extractWebsiteFilesPayload(params);
+	const bannerPayload = stripWebsiteFileFields(params);
+
+	const model = new db.Banner(bannerPayload);
 	model.lastEditedBy = editId;
     // save model
     await model.save();
+
+	if (websiteFilesInput.length > 0) {
+		await replaceWebsiteFiles(model.id, websiteFilesInput, editId);
+	}
 
     return basicDetails(await getBanner(model.id));
 }
 
 async function update(id, params, editId) {
     const model = await getBanner(id);
+	const websiteFilesWasProvided = params.websiteFiles !== undefined || params.websiteProjectTree !== undefined;
+	const websiteFilesInput = extractWebsiteFilesPayload(params);
+	const bannerPayload = stripWebsiteFileFields(params);
 
 	// validate (if name/shortname was changed)
 	//if (params.name && model.name == params.name && model.description == params.description ) {
@@ -159,10 +169,14 @@ async function update(id, params, editId) {
 	}
 
     // copy params to model and save
-    Object.assign(model, params);
+	Object.assign(model, bannerPayload);
     model.updated = Date.now();
 	model.lastEditedBy = editId;
     await model.save();
+
+	if (websiteFilesWasProvided) {
+		await replaceWebsiteFiles(model.id, websiteFilesInput, editId);
+	}
 
     return basicDetails(await getBanner(model.id));
 }
@@ -286,6 +300,11 @@ async function getBanner(id) {
 				required:false
 			},
 			{
+				model: db.BannerWebsiteFile,
+				as: 'websitefiles',
+				required: false
+			},
+			{
 				model: db.Container,
 				as:'containers',
 				required:false,
@@ -388,6 +407,11 @@ async function getTemplateBannersById(id) {
 						required:false
 					}
 				]
+			},
+			{
+				model: db.BannerWebsiteFile,
+				as: 'websitefiles',
+				required: false
 			},
 			{
 				model: db.Container,
@@ -509,6 +533,160 @@ async function getHistoryById(id) {
 }
 
 function basicDetails(model) {
-	const { id, name, description, websiteHtml, websiteCss, websiteJs, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId } = model;
-	return { id, name, description, websiteHtml, websiteCss, websiteJs, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId };
+	const { id, name, description, websiteHtml, websiteCss, websiteJs, websitefiles, status, created, updated, deletedAt, history, version, lastEditedBy, bannertypeId, bannertype, bannersizeId, bannersize, containers, containerId, template, templateId } = model;
+	return {
+		id,
+		name,
+		description,
+		websiteHtml,
+		websiteCss,
+		websiteJs,
+		websiteFiles: websitefiles || [],
+		status,
+		created,
+		updated,
+		deletedAt,
+		history,
+		version,
+		lastEditedBy,
+		bannertypeId,
+		bannertype,
+		bannersizeId,
+		bannersize,
+		containers,
+		containerId,
+		template,
+		templateId
+	};
+}
+
+function stripWebsiteFileFields(params) {
+	const bannerPayload = { ...params };
+	delete bannerPayload.websiteFiles;
+	delete bannerPayload.websiteProjectTree;
+	return bannerPayload;
+}
+
+function extractWebsiteFilesPayload(params) {
+	if (Array.isArray(params.websiteFiles)) {
+		return normalizeWebsiteFilesArray(params.websiteFiles);
+	}
+
+	if (params.websiteProjectTree && typeof params.websiteProjectTree === 'object') {
+		return flattenWebsiteProjectTree(params.websiteProjectTree);
+	}
+
+	return [];
+}
+
+function normalizeWebsiteFilesArray(websiteFiles) {
+	return websiteFiles
+		.filter((item) => item && typeof item === 'object' && item.name && item.nodeType)
+		.map((item, index) => {
+			const sourceId = String(item.id ?? `node-${index}`);
+			const parentSourceId = item.parentId !== undefined && item.parentId !== null ? String(item.parentId) : null;
+			const nodeType = item.nodeType === 'folder' ? 'folder' : 'file';
+
+			return {
+				sourceId,
+				parentSourceId,
+				name: String(item.name),
+				nodeType,
+				content: nodeType === 'file' ? normalizeWebsiteFileContent(item.content) : null,
+				mimeType: item.mimeType || null,
+				sortOrder: Number.isInteger(item.sortOrder) ? item.sortOrder : index,
+			};
+		});
+}
+
+function flattenWebsiteProjectTree(rootNode) {
+	const normalizedRows = [];
+
+	const flatten = (node, parentSourceId, sortOrder) => {
+		if (!node || !node.name) {
+			return;
+		}
+
+		const sourceId = String(node.id ?? `node-${normalizedRows.length}`);
+		const nodeType = node.type === 'folder' ? 'folder' : 'file';
+
+		normalizedRows.push({
+			sourceId,
+			parentSourceId,
+			name: String(node.name),
+			nodeType,
+			content: nodeType === 'file' ? normalizeWebsiteFileContent(node.content) : null,
+			mimeType: node.mimeType || null,
+			sortOrder,
+		});
+
+		if (Array.isArray(node.children)) {
+			node.children.forEach((childNode, childIndex) => flatten(childNode, sourceId, childIndex));
+		}
+	};
+
+	flatten(rootNode, null, 0);
+
+	return normalizedRows;
+}
+
+function normalizeWebsiteFileContent(content) {
+	if (content === undefined || content === null) {
+		return '';
+	}
+
+	return String(content);
+}
+
+async function replaceWebsiteFiles(bannerId, websiteFiles, editId) {
+	await db.BannerWebsiteFile.destroy({ where: { bannerId } });
+
+	if (!websiteFiles || websiteFiles.length === 0) {
+		return;
+	}
+
+	const sourceToDbId = {};
+	const pendingRows = [...websiteFiles];
+	let madeProgress = true;
+
+	while (pendingRows.length > 0 && madeProgress) {
+		madeProgress = false;
+
+		for (let index = pendingRows.length - 1; index >= 0; index--) {
+			const row = pendingRows[index];
+			const parentReady = row.parentSourceId === null || sourceToDbId[row.parentSourceId] !== undefined;
+
+			if (!parentReady) {
+				continue;
+			}
+
+			const createdRow = await db.BannerWebsiteFile.create({
+				bannerId,
+				name: row.name,
+				nodeType: row.nodeType,
+				parentId: row.parentSourceId ? sourceToDbId[row.parentSourceId] : null,
+				content: row.nodeType === 'file' ? row.content : null,
+				mimeType: row.mimeType,
+				sortOrder: row.sortOrder,
+				lastEditedBy: editId,
+			});
+
+			sourceToDbId[row.sourceId] = createdRow.id;
+			pendingRows.splice(index, 1);
+			madeProgress = true;
+		}
+	}
+
+	for (const row of pendingRows) {
+		await db.BannerWebsiteFile.create({
+			bannerId,
+			name: row.name,
+			nodeType: row.nodeType,
+			parentId: null,
+			content: row.nodeType === 'file' ? row.content : null,
+			mimeType: row.mimeType,
+			sortOrder: row.sortOrder,
+			lastEditedBy: editId,
+		});
+	}
 }

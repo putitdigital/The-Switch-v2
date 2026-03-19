@@ -128,6 +128,14 @@ async function initialize() {
 	db.Banner.belongsTo(db.BannerSize, { onDelete: 'NO ACTION' });
 	db.BannerSize.hasMany(db.Banner);
 
+	/**
+	 * DATA MODEL - Website Files (for website creatives)
+	 */
+	db.BannerWebsiteFile = require('../models/bannerwebsitefile.model')(sequelize);
+
+	db.BannerWebsiteFile.belongsTo(db.Banner, { onDelete: 'CASCADE' });
+	db.Banner.hasMany(db.BannerWebsiteFile, { as: 'websitefiles', onDelete: 'CASCADE' });
+
 	/*** /
 	db.Banner.sync({
 		alter: {
@@ -252,6 +260,7 @@ async function initialize() {
 
 	Temporal(db.Templates, sequelize);
 	Temporal(db.Banner, sequelize);
+	Temporal(db.BannerWebsiteFile, sequelize);
 	Temporal(db.Container, sequelize);
 	Temporal(db.Component, sequelize);
 	Temporal(db.ComponentMeta, sequelize);

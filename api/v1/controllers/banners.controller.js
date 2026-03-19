@@ -59,7 +59,17 @@ function createSchema(req, res, next) {
 		bannersizeId: Joi.number().required(),
 		websiteHtml: Joi.string().allow('').optional(),
 		websiteCss: Joi.string().allow('').optional(),
-		websiteJs: Joi.string().allow('').optional()
+		websiteJs: Joi.string().allow('').optional(),
+		websiteFiles: Joi.array().items(Joi.object({
+			id: Joi.alternatives().try(Joi.string(), Joi.number()).optional(),
+			name: Joi.string().required(),
+			nodeType: Joi.string().valid('folder', 'file').required(),
+			parentId: Joi.alternatives().try(Joi.string(), Joi.number(), Joi.valid(null)).optional(),
+			content: Joi.string().allow('').optional(),
+			mimeType: Joi.string().allow('').optional(),
+			sortOrder: Joi.number().integer().optional(),
+		})).optional(),
+		websiteProjectTree: Joi.object().optional(),
     });
 	validateRequest(req, next, schema);
 }
@@ -79,7 +89,17 @@ function updateSchema(req, res, next) {
 		bannersizeId: Joi.number().required(),
 		websiteHtml: Joi.string().allow('').optional(),
 		websiteCss: Joi.string().allow('').optional(),
-		websiteJs: Joi.string().allow('').optional()
+		websiteJs: Joi.string().allow('').optional(),
+		websiteFiles: Joi.array().items(Joi.object({
+			id: Joi.alternatives().try(Joi.string(), Joi.number()).optional(),
+			name: Joi.string().required(),
+			nodeType: Joi.string().valid('folder', 'file').required(),
+			parentId: Joi.alternatives().try(Joi.string(), Joi.number(), Joi.valid(null)).optional(),
+			content: Joi.string().allow('').optional(),
+			mimeType: Joi.string().allow('').optional(),
+			sortOrder: Joi.number().integer().optional(),
+		})).optional(),
+		websiteProjectTree: Joi.object().optional(),
 	});
     validateRequest(req, next, schemaRules);
 }

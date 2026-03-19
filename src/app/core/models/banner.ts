@@ -6,6 +6,7 @@ export class Banner {
 	websiteHtml!: string;
 	websiteCss!: string;
 	websiteJs!: string;
+	websiteFiles!: any[];
 	status!: boolean;
 	bannertypeId!: number;
 	bannertype!: any;

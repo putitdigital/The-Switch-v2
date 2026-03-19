@@ -34,10 +34,39 @@
 			</button>
 		</div>
 	</div>
-
 	<div class="website-code-editor__layout" [ngClass]="{ 'website-code-editor__layout--preview-collapsed': websitePreviewCollapsed }">
+		<div class="website-code-editor__file-structure" aria-label="Website project file structure">
+			<div class="website-code-editor__file-structure-title">Project Files</div>
+			<!-- add it here  -->
+			<div class="website-code-editor__file-actions">
+				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="addWebsiteFolder()">Add Folder</button>
+				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="addWebsiteFile()">Add File</button>
+				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="renameWebsiteTreeNode()">Rename</button>
+				<button type="button" class="btn btn-outline-danger btn-sm" (click)="deleteWebsiteTreeNode()">Delete</button>
+			</div>
+			<ul class="website-code-editor__tree">
+				<li
+					*ngFor="let row of websiteTreeRows"
+					class="website-code-editor__tree-item"
+					[ngClass]="{
+						'website-code-editor__tree-item--project': row.node.id === websiteProjectTree.id,
+						'website-code-editor__tree-item--folder': row.node.type === 'folder' && row.node.id !== websiteProjectTree.id,
+						'website-code-editor__tree-item--file': row.node.type === 'file',
+						'website-code-editor__tree-item--selected': selectedWebsiteTreeNodeId === row.node.id
+					}"
+					[style.padding-left.px]="row.depth * 16"
+				>
+					<button
+						type="button"
+						class="website-code-editor__tree-button"
+						(click)="onWebsiteTreeNodeClick(row.node)">
+						{{row.node.name}}
+					</button>
+				</li>
+			</ul>
+		</div>
 		<div class="website-code-editor__panels">
-			<mat-tab-group class="website-code-editor__tabs" animationDuration="0ms">
+			<mat-tab-group class="website-code-editor__tabs" animationDuration="0ms" [(selectedIndex)]="selectedWebsiteEditorTab">
 				<mat-tab label="HTML">
 					<div class="website-code-editor__panel">
 						<textarea

@@ -29,6 +29,17 @@ import * as introJs from 'intro.js';
 import { BehaviorSubject, combineLatest, Observable, Subject } from 'rxjs';
 import { first, map, takeUntil } from 'rxjs/operators';
 
+type WebsiteTreeNodeType = 'folder' | 'file';
+
+interface WebsiteTreeNode {
+	id: string;
+	name: string;
+	type: WebsiteTreeNodeType;
+	children?: WebsiteTreeNode[];
+	content?: string;
+	mimeType?: string;
+}
+
 //import * as GIF from 'gif.js.optimized/dist/gif.js';
 
 // Declaring Global Variables in TypeScript
@@ -118,6 +129,32 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	public websiteJsCode = '';
 	public websiteSaveInProgress = false;
 	public websitePreviewCollapsed = false;
+	public selectedWebsiteEditorTab = 0;
+	public selectedWebsiteTreeNodeId = 'project-root';
+	public websiteProjectTree: WebsiteTreeNode = {
+		id: 'project-root',
+		name: 'website putitdigital template',
+		type: 'folder',
+		children: [
+			{
+				id: 'project-css',
+				name: 'css',
+				type: 'folder',
+				children: [
+					{ id: 'project-css-style', name: 'style.css', type: 'file', content: '', mimeType: 'text/css' }
+				]
+			},
+			{
+				id: 'project-js',
+				name: 'js',
+				type: 'folder',
+				children: [
+					{ id: 'project-js-main', name: 'main.js', type: 'file', content: '', mimeType: 'application/javascript' }
+				]
+			},
+			{ id: 'project-index', name: 'index.html', type: 'file', content: '', mimeType: 'text/html' }
+		]
+	};
 
 	// creative rendered and ready
 	private creativeReadySubject: BehaviorSubject<boolean | any>;
@@ -442,6 +479,399 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		this.websitePreviewCollapsed = !this.websitePreviewCollapsed;
 	}
 
+	public get websiteTreeRows(): Array<{ node: WebsiteTreeNode; depth: number }> {
+		const rows: Array<{ node: WebsiteTreeNode; depth: number }> = [
+			{ node: this.websiteProjectTree, depth: 0 }
+		];
+
+		this.flattenWebsiteTree(this.websiteProjectTree.children || [], 1, rows);
+
+		return rows;
+	}
+
+	public selectWebsiteTreeNode(nodeId: string): void {
+		this.selectedWebsiteTreeNodeId = nodeId;
+	}
+
+	public onWebsiteTreeNodeClick(node: WebsiteTreeNode): void {
+		this.selectWebsiteTreeNode(node.id);
+
+		if (node.type !== 'file') {
+			return;
+		}
+
+		this.setWebsiteEditorTabByFileName(node.name);
+	}
+
+	public addWebsiteFolder(): void {
+		const folderName = window.prompt('Enter folder name');
+		const trimmedFolderName = folderName ? folderName.trim() : '';
+
+		if (!trimmedFolderName) {
+			return;
+		}
+
+		const targetFolder = this.getWebsiteTreeTargetFolder();
+		targetFolder.children = targetFolder.children || [];
+
+		const newFolder: WebsiteTreeNode = {
+			id: this.createWebsiteTreeId(),
+			name: trimmedFolderName,
+			type: 'folder',
+			children: []
+		};
+
+		targetFolder.children.push(newFolder);
+		this.selectedWebsiteTreeNodeId = newFolder.id;
+	}
+
+	public addWebsiteFile(): void {
+		const fileName = window.prompt('Enter file name (example: about.html)');
+		const trimmedFileName = fileName ? fileName.trim() : '';
+
+		if (!trimmedFileName) {
+			return;
+		}
+
+		const targetFolder = this.getWebsiteTreeTargetFolder();
+		targetFolder.children = targetFolder.children || [];
+
+		const newFile: WebsiteTreeNode = {
+			id: this.createWebsiteTreeId(),
+			name: trimmedFileName,
+			type: 'file',
+			content: '',
+			mimeType: this.getWebsiteFileMimeType(trimmedFileName)
+		};
+
+		targetFolder.children.push(newFile);
+		this.selectedWebsiteTreeNodeId = newFile.id;
+		this.setWebsiteEditorTabByFileName(newFile.name);
+	}
+
+	public renameWebsiteTreeNode(): void {
+		const selectedNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, this.selectedWebsiteTreeNodeId);
+
+		if (!selectedNode) {
+			return;
+		}
+
+		if (selectedNode.id === this.websiteProjectTree.id) {
+			return;
+		}
+
+		const updatedName = window.prompt('Enter new name', selectedNode.name);
+		const trimmedUpdatedName = updatedName ? updatedName.trim() : '';
+
+		if (!trimmedUpdatedName) {
+			return;
+		}
+
+		selectedNode.name = trimmedUpdatedName;
+
+		if (selectedNode.type === 'file') {
+			this.setWebsiteEditorTabByFileName(selectedNode.name);
+		}
+	}
+
+	public deleteWebsiteTreeNode(): void {
+		const selectedNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, this.selectedWebsiteTreeNodeId);
+
+		if (!selectedNode || selectedNode.id === this.websiteProjectTree.id) {
+			return;
+		}
+
+		const parentNode = this.findWebsiteTreeParentById(this.websiteProjectTree, selectedNode.id);
+
+		if (!parentNode || !parentNode.children) {
+			return;
+		}
+
+		const confirmDelete = window.confirm(`Delete "${selectedNode.name}"?`);
+
+		if (!confirmDelete) {
+			return;
+		}
+
+		parentNode.children = parentNode.children.filter((childNode: WebsiteTreeNode) => childNode.id !== selectedNode.id);
+		this.selectedWebsiteTreeNodeId = parentNode.id;
+	}
+
+	private flattenWebsiteTree(
+		nodes: WebsiteTreeNode[],
+		depth: number,
+		rows: Array<{ node: WebsiteTreeNode; depth: number }>
+	): void {
+		nodes.forEach((node: WebsiteTreeNode) => {
+			rows.push({ node, depth });
+
+			if (node.type === 'folder' && node.children && node.children.length > 0) {
+				this.flattenWebsiteTree(node.children, depth + 1, rows);
+			}
+		});
+	}
+
+	private getWebsiteTreeTargetFolder(): WebsiteTreeNode {
+		const selectedNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, this.selectedWebsiteTreeNodeId);
+
+		if (!selectedNode) {
+			return this.websiteProjectTree;
+		}
+
+		if (selectedNode.type === 'folder') {
+			return selectedNode;
+		}
+
+		return this.findWebsiteTreeParentById(this.websiteProjectTree, selectedNode.id) || this.websiteProjectTree;
+	}
+
+	private findWebsiteTreeNodeById(node: WebsiteTreeNode, nodeId: string): WebsiteTreeNode | undefined {
+		if (node.id === nodeId) {
+			return node;
+		}
+
+		if (!node.children || node.children.length === 0) {
+			return undefined;
+		}
+
+		for (const childNode of node.children) {
+			const foundNode = this.findWebsiteTreeNodeById(childNode, nodeId);
+
+			if (foundNode) {
+				return foundNode;
+			}
+		}
+
+		return undefined;
+	}
+
+	private findWebsiteTreeParentById(
+		node: WebsiteTreeNode,
+		nodeId: string,
+		parentNode?: WebsiteTreeNode
+	): WebsiteTreeNode | undefined {
+		if (node.id === nodeId) {
+			return parentNode;
+		}
+
+		if (!node.children || node.children.length === 0) {
+			return undefined;
+		}
+
+		for (const childNode of node.children) {
+			const foundParent = this.findWebsiteTreeParentById(childNode, nodeId, node);
+
+			if (foundParent) {
+				return foundParent;
+			}
+		}
+
+		return undefined;
+	}
+
+	private createWebsiteTreeId(): string {
+		return `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	}
+
+	private setWebsiteEditorTabByFileName(fileName: string): void {
+		const normalizedFileName = fileName.toLowerCase();
+
+		if (normalizedFileName.endsWith('.html')) {
+			this.selectedWebsiteEditorTab = 0;
+			return;
+		}
+
+		if (normalizedFileName.endsWith('.css')) {
+			this.selectedWebsiteEditorTab = 1;
+			return;
+		}
+
+		if (normalizedFileName.endsWith('.js')) {
+			this.selectedWebsiteEditorTab = 2;
+		}
+	}
+
+	private getWebsiteFileMimeType(fileName: string): string | undefined {
+		const normalizedFileName = fileName.toLowerCase();
+
+		if (normalizedFileName.endsWith('.html')) {
+			return 'text/html';
+		}
+
+		if (normalizedFileName.endsWith('.css')) {
+			return 'text/css';
+		}
+
+		if (normalizedFileName.endsWith('.js')) {
+			return 'application/javascript';
+		}
+
+		return undefined;
+	}
+
+	private upsertWebsiteFileNode(path: string[], content: string, mimeType: string): void {
+		if (path.length === 0) {
+			return;
+		}
+
+		let currentNode = this.websiteProjectTree;
+
+		for (let index = 0; index < path.length - 1; index++) {
+			const folderName = path[index];
+			currentNode.children = currentNode.children || [];
+
+			let nextFolder = currentNode.children.find((childNode: WebsiteTreeNode) =>
+				childNode.type === 'folder' && childNode.name.toLowerCase() === folderName.toLowerCase());
+
+			if (!nextFolder) {
+				nextFolder = {
+					id: this.createWebsiteTreeId(),
+					name: folderName,
+					type: 'folder',
+					children: []
+				};
+				currentNode.children.push(nextFolder);
+			}
+
+			currentNode = nextFolder;
+		}
+
+		const fileName = path[path.length - 1];
+		currentNode.children = currentNode.children || [];
+
+		let fileNode = currentNode.children.find((childNode: WebsiteTreeNode) =>
+			childNode.type === 'file' && childNode.name.toLowerCase() === fileName.toLowerCase());
+
+		if (!fileNode) {
+			fileNode = {
+				id: this.createWebsiteTreeId(),
+				name: fileName,
+				type: 'file',
+				content: '',
+				mimeType
+			};
+			currentNode.children.push(fileNode);
+		}
+
+		fileNode.content = content;
+		fileNode.mimeType = mimeType;
+	}
+
+	private syncWebsiteTreeFromEditors(): void {
+		this.upsertWebsiteFileNode(['index.html'], this.websiteHtmlCode || '', 'text/html');
+		this.upsertWebsiteFileNode(['css', 'style.css'], this.websiteCssCode || '', 'text/css');
+		this.upsertWebsiteFileNode(['js', 'main.js'], this.websiteJsCode || '', 'application/javascript');
+	}
+
+	private getWebsiteFileContent(path: string[]): string {
+		let currentNode: WebsiteTreeNode | undefined = this.websiteProjectTree;
+
+		for (let index = 0; index < path.length; index++) {
+			const segment = path[index];
+			const isFile = index === path.length - 1;
+
+			if (!currentNode?.children || currentNode.children.length === 0) {
+				return '';
+			}
+
+			currentNode = currentNode.children.find((childNode: WebsiteTreeNode) => {
+				if (childNode.name.toLowerCase() !== segment.toLowerCase()) {
+					return false;
+				}
+
+				return isFile ? childNode.type === 'file' : childNode.type === 'folder';
+			});
+
+			if (!currentNode) {
+				return '';
+			}
+		}
+
+		return currentNode.type === 'file' ? (currentNode.content || '') : '';
+	}
+
+	private syncEditorsFromWebsiteTree(): void {
+		this.websiteHtmlCode = this.getWebsiteFileContent(['index.html']);
+		this.websiteCssCode = this.getWebsiteFileContent(['css', 'style.css']);
+		this.websiteJsCode = this.getWebsiteFileContent(['js', 'main.js']);
+	}
+
+	private buildWebsiteTreeFromBannerFiles(websiteFiles: any[]): WebsiteTreeNode | undefined {
+		if (!Array.isArray(websiteFiles) || websiteFiles.length === 0) {
+			return undefined;
+		}
+
+		const rows = websiteFiles
+			.filter((item: any) => item && item.name && item.nodeType)
+			.map((item: any, index: number) => ({
+				id: String(item.id ?? `node-${index}`),
+				parentId: item.parentId !== undefined && item.parentId !== null ? String(item.parentId) : null,
+				name: String(item.name),
+				type: (item.nodeType === 'folder' ? 'folder' : 'file') as WebsiteTreeNodeType,
+				content: item.nodeType === 'file' ? (item.content ?? '') : undefined,
+				mimeType: item.mimeType || this.getWebsiteFileMimeType(String(item.name)),
+				sortOrder: Number.isInteger(item.sortOrder) ? item.sortOrder : index,
+			}))
+			.sort((a, b) => a.sortOrder - b.sortOrder);
+
+		if (rows.length === 0) {
+			return undefined;
+		}
+
+		const nodesById = new Map<string, WebsiteTreeNode>();
+
+		rows.forEach((row) => {
+			nodesById.set(row.id, {
+				id: row.id,
+				name: row.name,
+				type: row.type,
+				content: row.type === 'file' ? row.content : undefined,
+				mimeType: row.type === 'file' ? row.mimeType : undefined,
+				children: row.type === 'folder' ? [] : undefined,
+			});
+		});
+
+		const syntheticRoot: WebsiteTreeNode = {
+			id: 'project-root',
+			name: 'website putitdigital template',
+			type: 'folder',
+			children: []
+		};
+
+		rows.forEach((row) => {
+			const node = nodesById.get(row.id);
+
+			if (!node) {
+				return;
+			}
+
+			if (!row.parentId) {
+				syntheticRoot.children?.push(node);
+				return;
+			}
+
+			const parentNode = nodesById.get(row.parentId);
+
+			if (!parentNode || parentNode.type !== 'folder') {
+				syntheticRoot.children?.push(node);
+				return;
+			}
+
+			parentNode.children = parentNode.children || [];
+			parentNode.children.push(node);
+		});
+
+		if (!syntheticRoot.children || syntheticRoot.children.length === 0) {
+			return undefined;
+		}
+
+		if (syntheticRoot.children.length === 1 && syntheticRoot.children[0].type === 'folder') {
+			return syntheticRoot.children[0];
+		}
+
+		return syntheticRoot;
+	}
+
 	public resetWebsiteCode(): void {
 		const templateName = this.template?.name || 'Website Creative';
 		const clientName = this.template?.client?.name || 'Client';
@@ -535,14 +965,33 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			return;
 		}
 
+		const websiteTreeFromBanner = this.buildWebsiteTreeFromBannerFiles(activeBanner.websiteFiles || []);
+
+		if (websiteTreeFromBanner) {
+			this.websiteProjectTree = websiteTreeFromBanner;
+			this.selectedWebsiteTreeNodeId = this.websiteProjectTree.id;
+			this.syncEditorsFromWebsiteTree();
+
+			if (!this.websiteHtmlCode && !this.websiteCssCode && !this.websiteJsCode &&
+				(activeBanner.websiteHtml || activeBanner.websiteCss || activeBanner.websiteJs)) {
+				this.websiteHtmlCode = activeBanner.websiteHtml || '';
+				this.websiteCssCode = activeBanner.websiteCss || '';
+				this.websiteJsCode = activeBanner.websiteJs || '';
+			}
+
+			return;
+		}
+
 		if (activeBanner.websiteHtml || activeBanner.websiteCss || activeBanner.websiteJs) {
 			this.websiteHtmlCode = activeBanner.websiteHtml || '';
 			this.websiteCssCode = activeBanner.websiteCss || '';
 			this.websiteJsCode = activeBanner.websiteJs || '';
+			this.syncWebsiteTreeFromEditors();
 			return;
 		}
 
 		this.resetWebsiteCode();
+		this.syncWebsiteTreeFromEditors();
 	}
 
 	public saveWebsiteCode(): void {
@@ -554,6 +1003,7 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		}
 
 		this.websiteSaveInProgress = true;
+		this.syncWebsiteTreeFromEditors();
 
 		this.bannerService.update(String(activeBanner.id), {
 			name: activeBanner.name,
@@ -564,13 +1014,24 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			websiteHtml: this.websiteHtmlCode,
 			websiteCss: this.websiteCssCode,
 			websiteJs: this.websiteJsCode,
+			websiteProjectTree: this.websiteProjectTree,
 		})
 			.pipe(first())
 			.subscribe({
 				next: (updatedBanner: Banner) => {
-					activeBanner.websiteHtml = updatedBanner.websiteHtml || this.websiteHtmlCode;
-					activeBanner.websiteCss = updatedBanner.websiteCss || this.websiteCssCode;
-					activeBanner.websiteJs = updatedBanner.websiteJs || this.websiteJsCode;
+					activeBanner.websiteHtml = updatedBanner.websiteHtml ?? this.websiteHtmlCode;
+					activeBanner.websiteCss = updatedBanner.websiteCss ?? this.websiteCssCode;
+					activeBanner.websiteJs = updatedBanner.websiteJs ?? this.websiteJsCode;
+					activeBanner.websiteFiles = updatedBanner.websiteFiles || [];
+
+					const refreshedTree = this.buildWebsiteTreeFromBannerFiles(updatedBanner.websiteFiles || []);
+
+					if (refreshedTree) {
+						this.websiteProjectTree = refreshedTree;
+						this.selectedWebsiteTreeNodeId = this.websiteProjectTree.id;
+						this.syncEditorsFromWebsiteTree();
+					}
+
 					this.websiteSaveInProgress = false;
 					this.alertService.success('Website code saved successfully.', { keepAfterRouteChange: true });
 				},
