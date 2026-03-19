@@ -2,7 +2,7 @@ import { CdkDragDrop, moveItemInArray, transferArrayItem } from '@angular/cdk/dr
 import { BreakpointObserver } from '@angular/cdk/layout';
 import { STEPPER_GLOBAL_OPTIONS } from '@angular/cdk/stepper';
 import { DOCUMENT, Location } from '@angular/common';
-import { Component, ElementRef, EventEmitter, Inject, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Inject, OnDestroy, OnInit, Output, TemplateRef, ViewChild } from '@angular/core';
 import { FormBuilder, FormControl } from '@angular/forms';
 import { MatBottomSheet } from '@angular/material/bottom-sheet';
 import { MatDialog } from '@angular/material/dialog';
@@ -39,6 +39,20 @@ interface WebsiteTreeNode {
 	content?: string;
 	mimeType?: string;
 }
+
+interface WebsiteEditorTab {
+	nodeId: string;
+	name: string;
+	type: 'html' | 'css' | 'js';
+}
+
+interface WebsiteHtmlComponentRow {
+	id: string;
+	label: string;
+	depth: number;
+}
+
+type WebsiteImportConflictMode = 'replace' | 'skip' | 'ask';
 
 //import * as GIF from 'gif.js.optimized/dist/gif.js';
 
@@ -130,7 +144,14 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	public websiteSaveInProgress = false;
 	public websitePreviewCollapsed = false;
 	public selectedWebsiteEditorTab = 0;
+	public websiteEditorTabs: WebsiteEditorTab[] = [];
+	public websiteImportConflictSelection: WebsiteImportConflictMode = 'ask';
+	public websiteRememberImportConflictForSession = false;
+	public websiteImportConflictPaths: string[] = [];
 	public selectedWebsiteTreeNodeId = 'project-root';
+	private selectedWebsiteEditorFileByType: { html?: string; css?: string; js?: string } = {};
+	private rememberedWebsiteImportConflictMode?: WebsiteImportConflictMode;
+	private websiteImportConflictDialogRef: any;
 	public websiteProjectTree: WebsiteTreeNode = {
 		id: 'project-root',
 		name: 'website putitdigital template',
@@ -311,6 +332,7 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	@ViewChild('walkthrough01') walkthrough01!: ElementRef<HTMLElement>;
 	@ViewChild('drawer') sidedrawer!: MatDrawer;
 	@ViewChild('timelineCanvas') timelineCanvas!: ElementRef<HTMLElement>;
+	@ViewChild('websiteImportConflictDialog') websiteImportConflictDialog!: TemplateRef<any>;
 
 	ngOnInit() {
 
@@ -473,6 +495,8 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 				this.websiteJsCode = value;
 				break;
 		}
+
+		this.setSelectedWebsiteFileContent(type, value);
 	}
 
 	public toggleWebsitePreview(): void {
@@ -489,6 +513,25 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		return rows;
 	}
 
+	public get websiteHtmlComponentRows(): WebsiteHtmlComponentRow[] {
+		const htmlSource = this.getWebsiteHtmlSourceForComponentTree();
+
+		if (!htmlSource || !htmlSource.trim()) {
+			return [];
+		}
+
+		const documentRef = new DOMParser().parseFromString(htmlSource, 'text/html');
+		const rows: WebsiteHtmlComponentRow[] = [];
+
+		if (!documentRef.documentElement) {
+			return rows;
+		}
+
+		this.collectHtmlComponentRows(documentRef.documentElement, 0, rows);
+
+		return rows;
+	}
+
 	public selectWebsiteTreeNode(nodeId: string): void {
 		this.selectedWebsiteTreeNodeId = nodeId;
 	}
@@ -500,7 +543,13 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			return;
 		}
 
-		this.setWebsiteEditorTabByFileName(node.name);
+		const editorType = this.getWebsiteEditorTypeByFileName(node.name);
+
+		if (!editorType) {
+			return;
+		}
+
+		this.openWebsiteEditorTab(node, editorType);
 	}
 
 	public addWebsiteFolder(): void {
@@ -546,7 +595,7 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 
 		targetFolder.children.push(newFile);
 		this.selectedWebsiteTreeNodeId = newFile.id;
-		this.setWebsiteEditorTabByFileName(newFile.name);
+		this.onWebsiteTreeNodeClick(newFile);
 	}
 
 	public renameWebsiteTreeNode(): void {
@@ -570,7 +619,25 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		selectedNode.name = trimmedUpdatedName;
 
 		if (selectedNode.type === 'file') {
-			this.setWebsiteEditorTabByFileName(selectedNode.name);
+			this.websiteEditorTabs = this.websiteEditorTabs.map((tab: WebsiteEditorTab) => {
+				if (tab.nodeId !== selectedNode.id) {
+					return tab;
+				}
+
+				const nextType = this.getWebsiteEditorTypeByFileName(selectedNode.name);
+
+				if (!nextType) {
+					return tab;
+				}
+
+				return {
+					...tab,
+					name: selectedNode.name,
+					type: nextType,
+				};
+			});
+
+			this.onWebsiteTreeNodeClick(selectedNode);
 		}
 	}
 
@@ -595,6 +662,210 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 
 		parentNode.children = parentNode.children.filter((childNode: WebsiteTreeNode) => childNode.id !== selectedNode.id);
 		this.selectedWebsiteTreeNodeId = parentNode.id;
+		this.closeWebsiteEditorTabsByNodeId(selectedNode.id);
+	}
+
+	public async importWebsiteFiles(event: Event): Promise<void> {
+		const inputElement = event.target as HTMLInputElement;
+		const selectedFiles = Array.from(inputElement.files || []);
+
+		if (selectedFiles.length === 0) {
+			return;
+		}
+
+		const importedEntries = await Promise.all(selectedFiles.map(async (file: File) => ({
+			path: [file.name],
+			content: await file.text(),
+			mimeType: file.type || this.getWebsiteFileMimeType(file.name) || 'text/plain',
+		})));
+
+		const conflictMode = await this.resolveWebsiteImportConflictMode(importedEntries);
+
+		if (!conflictMode) {
+			inputElement.value = '';
+			return;
+		}
+
+		this.importWebsiteFileEntries(importedEntries, conflictMode);
+		inputElement.value = '';
+	}
+
+	public async importWebsiteFolder(event: Event): Promise<void> {
+		const inputElement = event.target as HTMLInputElement;
+		const selectedFiles = Array.from(inputElement.files || []);
+
+		if (selectedFiles.length === 0) {
+			return;
+		}
+
+		const importedEntries = await Promise.all(selectedFiles.map(async (file: File) => {
+			const relativePath = (file as any).webkitRelativePath || file.name;
+
+			return {
+				path: String(relativePath)
+					.split('/')
+					.filter((segment: string) => !!segment),
+				content: await file.text(),
+				mimeType: file.type || this.getWebsiteFileMimeType(file.name) || 'text/plain',
+			};
+		}));
+
+		const conflictMode = await this.resolveWebsiteImportConflictMode(importedEntries);
+
+		if (!conflictMode) {
+			inputElement.value = '';
+			return;
+		}
+
+		this.importWebsiteFileEntries(importedEntries, conflictMode);
+		inputElement.value = '';
+	}
+
+	private importWebsiteFileEntries(entries: Array<{ path: string[]; content: string; mimeType: string }>, conflictMode: WebsiteImportConflictMode): void {
+		if (!entries || entries.length === 0) {
+			return;
+		}
+
+		const targetFolder = this.getWebsiteTreeTargetFolder();
+		let firstOpenableNode: WebsiteTreeNode | undefined;
+
+		entries.forEach((entry) => {
+			const importedNode = this.upsertWebsiteFileNode(entry.path, entry.content, entry.mimeType, targetFolder, conflictMode);
+
+			if (!importedNode) {
+				return;
+			}
+
+			if (!firstOpenableNode && this.getWebsiteEditorTypeByFileName(importedNode.name)) {
+				firstOpenableNode = importedNode;
+			}
+		});
+
+		if (firstOpenableNode) {
+			this.onWebsiteTreeNodeClick(firstOpenableNode);
+		}
+	}
+
+	private async resolveWebsiteImportConflictMode(
+		entries: Array<{ path: string[]; content: string; mimeType: string }>
+	): Promise<WebsiteImportConflictMode | undefined> {
+		const targetFolder = this.getWebsiteTreeTargetFolder();
+		const conflictingPaths = entries
+			.filter((entry) => this.doesWebsiteFilePathExist(entry.path, targetFolder))
+			.map((entry) => entry.path.join('/'));
+
+		this.websiteImportConflictPaths = conflictingPaths;
+
+		if (conflictingPaths.length === 0) {
+			return 'replace';
+		}
+
+		return this.openWebsiteImportConflictDialog();
+	}
+
+	private openWebsiteImportConflictDialog(): Promise<WebsiteImportConflictMode | undefined> {
+		if (this.rememberedWebsiteImportConflictMode) {
+			return Promise.resolve(this.rememberedWebsiteImportConflictMode);
+		}
+
+		this.websiteImportConflictSelection = 'ask';
+		this.websiteRememberImportConflictForSession = false;
+
+		return new Promise((resolve) => {
+			this.websiteImportConflictDialogRef = this.dialog.open(this.websiteImportConflictDialog, {
+				width: '420px',
+				disableClose: true,
+			});
+
+			this.websiteImportConflictDialogRef.afterClosed().pipe(first()).subscribe((result: WebsiteImportConflictMode | undefined) => {
+				this.websiteImportConflictDialogRef = undefined;
+				resolve(result);
+			});
+		});
+	}
+
+	public confirmWebsiteImportConflictDialog(): void {
+		if (!this.websiteImportConflictDialogRef) {
+			return;
+		}
+
+		if (this.websiteRememberImportConflictForSession) {
+			this.rememberedWebsiteImportConflictMode = this.websiteImportConflictSelection;
+		} else {
+			this.rememberedWebsiteImportConflictMode = undefined;
+		}
+
+		this.websiteImportConflictDialogRef.close(this.websiteImportConflictSelection);
+		this.websiteImportConflictDialogRef = undefined;
+	}
+
+	public cancelWebsiteImportConflictDialog(): void {
+		if (!this.websiteImportConflictDialogRef) {
+			return;
+		}
+
+		this.websiteImportConflictDialogRef.close(undefined);
+		this.websiteImportConflictDialogRef = undefined;
+	}
+
+	public onWebsiteEditorTabIndexChange(index: number): void {
+		this.selectedWebsiteEditorTab = index;
+
+		const activeTab = this.websiteEditorTabs[index];
+
+		if (!activeTab) {
+			return;
+		}
+
+		const activeNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, activeTab.nodeId);
+
+		if (!activeNode || activeNode.type !== 'file') {
+			return;
+		}
+
+		this.selectedWebsiteTreeNodeId = activeNode.id;
+		this.selectedWebsiteEditorFileByType[activeTab.type] = activeNode.id;
+		this.syncCodeBufferFromNode(activeTab.type, activeNode.content || '');
+	}
+
+	public closeWebsiteEditorTab(index: number, event?: Event): void {
+		if (event) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+
+		if (index < 0 || index >= this.websiteEditorTabs.length) {
+			return;
+		}
+
+		this.websiteEditorTabs.splice(index, 1);
+
+		if (this.websiteEditorTabs.length === 0) {
+			this.selectedWebsiteEditorTab = 0;
+			return;
+		}
+
+		if (this.selectedWebsiteEditorTab >= this.websiteEditorTabs.length) {
+			this.selectedWebsiteEditorTab = this.websiteEditorTabs.length - 1;
+		}
+
+		this.onWebsiteEditorTabIndexChange(this.selectedWebsiteEditorTab);
+	}
+
+	public getWebsiteEditorTabCode(tab: WebsiteEditorTab): string {
+		const tabNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, tab.nodeId);
+
+		if (!tabNode || tabNode.type !== 'file') {
+			return '';
+		}
+
+		return tabNode.content || '';
+	}
+
+	public updateWebsiteEditorTabCode(tab: WebsiteEditorTab, value: string): void {
+		this.selectedWebsiteEditorFileByType[tab.type] = tab.nodeId;
+		this.syncCodeBufferFromNode(tab.type, value);
+		this.updateWebsiteCode(tab.type, value);
 	}
 
 	private flattenWebsiteTree(
@@ -673,6 +944,110 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		return `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	}
 
+	private openWebsiteEditorTab(node: WebsiteTreeNode, editorType: 'html' | 'css' | 'js'): void {
+		const existingIndex = this.websiteEditorTabs.findIndex((tab: WebsiteEditorTab) => tab.nodeId === node.id);
+
+		if (existingIndex !== -1) {
+			this.selectedWebsiteEditorTab = existingIndex;
+			this.onWebsiteEditorTabIndexChange(existingIndex);
+			return;
+		}
+
+		this.websiteEditorTabs.push({
+			nodeId: node.id,
+			name: node.name,
+			type: editorType,
+		});
+
+		this.selectedWebsiteEditorTab = this.websiteEditorTabs.length - 1;
+		this.onWebsiteEditorTabIndexChange(this.selectedWebsiteEditorTab);
+	}
+
+	private getWebsiteHtmlSourceForComponentTree(): string {
+		const activeTab = this.websiteEditorTabs[this.selectedWebsiteEditorTab];
+
+		if (activeTab && activeTab.type === 'html') {
+			return this.getWebsiteEditorTabCode(activeTab);
+		}
+
+		const selectedHtmlNode = this.getSelectedWebsiteFileNode('html');
+
+		if (selectedHtmlNode?.content) {
+			return selectedHtmlNode.content;
+		}
+
+		return this.getWebsiteFileContent(['index.html']) || this.websiteHtmlCode || '';
+	}
+
+	private collectHtmlComponentRows(element: Element, depth: number, rows: WebsiteHtmlComponentRow[]): void {
+		if (element.tagName.toLowerCase() === 'parsererror') {
+			return;
+		}
+
+		rows.push({
+			id: `html-node-${rows.length}`,
+			label: this.formatHtmlComponentLabel(element),
+			depth,
+		});
+
+		Array.from(element.children).forEach((childElement: Element) => {
+			this.collectHtmlComponentRows(childElement, depth + 1, rows);
+		});
+	}
+
+	private formatHtmlComponentLabel(element: Element): string {
+		const tagName = element.tagName.toLowerCase();
+		const idPart = element.id ? `#${element.id}` : '';
+		const classPart = (element.className && typeof element.className === 'string')
+			? `.${element.className.trim().split(/\s+/).filter(Boolean).join('.')}`
+			: '';
+
+		if (tagName === 'title') {
+			const titleText = (element.textContent || '').trim();
+
+			if (titleText) {
+				return `<${tagName}> ${titleText}`;
+			}
+		}
+
+		return `<${tagName}${idPart}${classPart}>`;
+	}
+
+	private closeWebsiteEditorTabsByNodeId(nodeId: string): void {
+		const remainingTabs = this.websiteEditorTabs.filter((tab: WebsiteEditorTab) => tab.nodeId !== nodeId);
+
+		if (remainingTabs.length === this.websiteEditorTabs.length) {
+			return;
+		}
+
+		this.websiteEditorTabs = remainingTabs;
+
+		if (this.websiteEditorTabs.length === 0) {
+			this.selectedWebsiteEditorTab = 0;
+			return;
+		}
+
+		if (this.selectedWebsiteEditorTab >= this.websiteEditorTabs.length) {
+			this.selectedWebsiteEditorTab = this.websiteEditorTabs.length - 1;
+		}
+
+		this.onWebsiteEditorTabIndexChange(this.selectedWebsiteEditorTab);
+	}
+
+	private syncCodeBufferFromNode(type: 'html' | 'css' | 'js', value: string): void {
+		if (type === 'html') {
+			this.websiteHtmlCode = value;
+			return;
+		}
+
+		if (type === 'css') {
+			this.websiteCssCode = value;
+			return;
+		}
+
+		this.websiteJsCode = value;
+	}
+
 	private setWebsiteEditorTabByFileName(fileName: string): void {
 		const normalizedFileName = fileName.toLowerCase();
 
@@ -689,6 +1064,24 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		if (normalizedFileName.endsWith('.js')) {
 			this.selectedWebsiteEditorTab = 2;
 		}
+	}
+
+	private getWebsiteEditorTypeByFileName(fileName: string): 'html' | 'css' | 'js' | undefined {
+		const normalizedFileName = fileName.toLowerCase();
+
+		if (normalizedFileName.endsWith('.html')) {
+			return 'html';
+		}
+
+		if (normalizedFileName.endsWith('.css')) {
+			return 'css';
+		}
+
+		if (normalizedFileName.endsWith('.js')) {
+			return 'js';
+		}
+
+		return undefined;
 	}
 
 	private getWebsiteFileMimeType(fileName: string): string | undefined {
@@ -709,12 +1102,49 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 		return undefined;
 	}
 
-	private upsertWebsiteFileNode(path: string[], content: string, mimeType: string): void {
+	private doesWebsiteFilePathExist(path: string[], startNode?: WebsiteTreeNode): boolean {
 		if (path.length === 0) {
-			return;
+			return false;
 		}
 
-		let currentNode = this.websiteProjectTree;
+		let currentNode: WebsiteTreeNode | undefined = startNode || this.websiteProjectTree;
+
+		for (let index = 0; index < path.length; index++) {
+			const segment = path[index];
+			const isFile = index === path.length - 1;
+
+			if (!currentNode?.children || currentNode.children.length === 0) {
+				return false;
+			}
+
+			currentNode = currentNode.children.find((childNode: WebsiteTreeNode) => {
+				if (childNode.name.toLowerCase() !== segment.toLowerCase()) {
+					return false;
+				}
+
+				return isFile ? childNode.type === 'file' : childNode.type === 'folder';
+			});
+
+			if (!currentNode) {
+				return false;
+			}
+		}
+
+		return currentNode.type === 'file';
+	}
+
+	private upsertWebsiteFileNode(
+		path: string[],
+		content: string,
+		mimeType: string,
+		startNode?: WebsiteTreeNode,
+		conflictMode: WebsiteImportConflictMode = 'replace'
+	): WebsiteTreeNode | undefined {
+		if (path.length === 0) {
+			return undefined;
+		}
+
+		let currentNode = startNode || this.websiteProjectTree;
 
 		for (let index = 0; index < path.length - 1; index++) {
 			const folderName = path[index];
@@ -751,16 +1181,30 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 				mimeType
 			};
 			currentNode.children.push(fileNode);
+		} else {
+			if (conflictMode === 'skip') {
+				return undefined;
+			}
+
+			if (conflictMode === 'ask') {
+				const shouldReplace = window.confirm(`File already exists: ${path.join('/')}. Replace it?`);
+
+				if (!shouldReplace) {
+					return undefined;
+				}
+			}
 		}
 
 		fileNode.content = content;
 		fileNode.mimeType = mimeType;
+
+		return fileNode;
 	}
 
 	private syncWebsiteTreeFromEditors(): void {
-		this.upsertWebsiteFileNode(['index.html'], this.websiteHtmlCode || '', 'text/html');
-		this.upsertWebsiteFileNode(['css', 'style.css'], this.websiteCssCode || '', 'text/css');
-		this.upsertWebsiteFileNode(['js', 'main.js'], this.websiteJsCode || '', 'application/javascript');
+		this.setSelectedWebsiteFileContent('html', this.websiteHtmlCode || '');
+		this.setSelectedWebsiteFileContent('css', this.websiteCssCode || '');
+		this.setSelectedWebsiteFileContent('js', this.websiteJsCode || '');
 	}
 
 	private getWebsiteFileContent(path: string[]): string {
@@ -791,9 +1235,142 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	}
 
 	private syncEditorsFromWebsiteTree(): void {
-		this.websiteHtmlCode = this.getWebsiteFileContent(['index.html']);
-		this.websiteCssCode = this.getWebsiteFileContent(['css', 'style.css']);
-		this.websiteJsCode = this.getWebsiteFileContent(['js', 'main.js']);
+		this.ensureSelectedWebsiteEditorFile('html');
+		this.ensureSelectedWebsiteEditorFile('css');
+		this.ensureSelectedWebsiteEditorFile('js');
+
+		this.websiteHtmlCode = this.getSelectedWebsiteFileContent('html');
+		this.websiteCssCode = this.getSelectedWebsiteFileContent('css');
+		this.websiteJsCode = this.getSelectedWebsiteFileContent('js');
+
+		if (this.websiteEditorTabs.length === 0) {
+			const indexNode = this.findWebsiteFileNodeByPath(['index.html']) || this.findFirstWebsiteFileNodeByExtension(this.websiteProjectTree, '.html');
+
+			if (indexNode) {
+				this.openWebsiteEditorTab(indexNode, 'html');
+			}
+		}
+	}
+
+	private ensureSelectedWebsiteEditorFile(type: 'html' | 'css' | 'js'): void {
+		const selectedNode = this.getSelectedWebsiteFileNode(type);
+
+		if (selectedNode) {
+			this.selectedWebsiteEditorFileByType[type] = selectedNode.id;
+			return;
+		}
+
+		if (type === 'html') {
+			this.upsertWebsiteFileNode(['index.html'], '', 'text/html');
+		}
+
+		if (type === 'css') {
+			this.upsertWebsiteFileNode(['css', 'style.css'], '', 'text/css');
+		}
+
+		if (type === 'js') {
+			this.upsertWebsiteFileNode(['js', 'main.js'], '', 'application/javascript');
+		}
+
+		const fallbackNode = this.getSelectedWebsiteFileNode(type);
+
+		if (fallbackNode) {
+			this.selectedWebsiteEditorFileByType[type] = fallbackNode.id;
+		}
+	}
+
+	private getSelectedWebsiteFileNode(type: 'html' | 'css' | 'js'): WebsiteTreeNode | undefined {
+		const selectedId = this.selectedWebsiteEditorFileByType[type];
+
+		if (selectedId) {
+			const selectedNode = this.findWebsiteTreeNodeById(this.websiteProjectTree, selectedId);
+
+			if (selectedNode && selectedNode.type === 'file') {
+				return selectedNode;
+			}
+		}
+
+		if (type === 'html') {
+			return this.findWebsiteFileNodeByPath(['index.html']) || this.findFirstWebsiteFileNodeByExtension(this.websiteProjectTree, '.html');
+		}
+
+		if (type === 'css') {
+			return this.findWebsiteFileNodeByPath(['css', 'style.css']) || this.findFirstWebsiteFileNodeByExtension(this.websiteProjectTree, '.css');
+		}
+
+		if (type === 'js') {
+			return this.findWebsiteFileNodeByPath(['js', 'main.js']) || this.findFirstWebsiteFileNodeByExtension(this.websiteProjectTree, '.js');
+		}
+
+		return undefined;
+	}
+
+	private setSelectedWebsiteFileContent(type: 'html' | 'css' | 'js', value: string): void {
+		this.ensureSelectedWebsiteEditorFile(type);
+		const selectedNode = this.getSelectedWebsiteFileNode(type);
+
+		if (!selectedNode || selectedNode.type !== 'file') {
+			return;
+		}
+
+		selectedNode.content = value;
+	}
+
+	private getSelectedWebsiteFileContent(type: 'html' | 'css' | 'js'): string {
+		const selectedNode = this.getSelectedWebsiteFileNode(type);
+
+		if (!selectedNode || selectedNode.type !== 'file') {
+			return '';
+		}
+
+		return selectedNode.content || '';
+	}
+
+	private findFirstWebsiteFileNodeByExtension(node: WebsiteTreeNode, extension: string): WebsiteTreeNode | undefined {
+		if (node.type === 'file' && node.name.toLowerCase().endsWith(extension)) {
+			return node;
+		}
+
+		if (!node.children || node.children.length === 0) {
+			return undefined;
+		}
+
+		for (const childNode of node.children) {
+			const fileNode = this.findFirstWebsiteFileNodeByExtension(childNode, extension);
+
+			if (fileNode) {
+				return fileNode;
+			}
+		}
+
+		return undefined;
+	}
+
+	private findWebsiteFileNodeByPath(path: string[]): WebsiteTreeNode | undefined {
+		let currentNode: WebsiteTreeNode | undefined = this.websiteProjectTree;
+
+		for (let index = 0; index < path.length; index++) {
+			const segment = path[index];
+			const isFile = index === path.length - 1;
+
+			if (!currentNode?.children || currentNode.children.length === 0) {
+				return undefined;
+			}
+
+			currentNode = currentNode.children.find((childNode: WebsiteTreeNode) => {
+				if (childNode.name.toLowerCase() !== segment.toLowerCase()) {
+					return false;
+				}
+
+				return isFile ? childNode.type === 'file' : childNode.type === 'folder';
+			});
+
+			if (!currentNode) {
+				return undefined;
+			}
+		}
+
+		return currentNode.type === 'file' ? currentNode : undefined;
 	}
 
 	private buildWebsiteTreeFromBannerFiles(websiteFiles: any[]): WebsiteTreeNode | undefined {
@@ -965,7 +1542,8 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			return;
 		}
 
-		const websiteTreeFromBanner = this.buildWebsiteTreeFromBannerFiles(activeBanner.websiteFiles || []);
+		const persistedWebsiteFiles = (activeBanner as any).websiteFiles || (activeBanner as any).websitefiles || [];
+		const websiteTreeFromBanner = this.buildWebsiteTreeFromBannerFiles(persistedWebsiteFiles);
 
 		if (websiteTreeFromBanner) {
 			this.websiteProjectTree = websiteTreeFromBanner;
@@ -1004,6 +1582,9 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 
 		this.websiteSaveInProgress = true;
 		this.syncWebsiteTreeFromEditors();
+		const legacyWebsiteHtml = this.getWebsiteFileContent(['index.html']);
+		const legacyWebsiteCss = this.getWebsiteFileContent(['css', 'style.css']);
+		const legacyWebsiteJs = this.getWebsiteFileContent(['js', 'main.js']);
 
 		this.bannerService.update(String(activeBanner.id), {
 			name: activeBanner.name,
@@ -1011,9 +1592,9 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 			templateId: activeBanner.templateId,
 			bannertypeId: activeBanner.bannertypeId,
 			bannersizeId: activeBanner.bannersizeId,
-			websiteHtml: this.websiteHtmlCode,
-			websiteCss: this.websiteCssCode,
-			websiteJs: this.websiteJsCode,
+			websiteHtml: legacyWebsiteHtml,
+			websiteCss: legacyWebsiteCss,
+			websiteJs: legacyWebsiteJs,
 			websiteProjectTree: this.websiteProjectTree,
 		})
 			.pipe(first())
@@ -1082,10 +1663,14 @@ export class TemplateBannerAddEditPage implements OnInit, OnDestroy {
 	}
 
 	public get websitePreviewDocument(): SafeHtml {
-		const head = this.extractWebsiteHead(this.websiteHtmlCode || '');
-		const html = this.normalizeWebsiteHtml(this.websiteHtmlCode || '');
-		const css = this.normalizeWebsiteCss(this.websiteCssCode || '');
-		const js = this.normalizeWebsiteJs(this.websiteJsCode || '');
+		const entryHtmlSource = this.getWebsiteFileContent(['index.html']) || this.websiteHtmlCode || '';
+		const entryCssSource = this.getWebsiteFileContent(['css', 'style.css']) || this.websiteCssCode || '';
+		const entryJsSource = this.getWebsiteFileContent(['js', 'main.js']) || this.websiteJsCode || '';
+
+		const head = this.extractWebsiteHead(entryHtmlSource);
+		const html = this.normalizeWebsiteHtml(entryHtmlSource);
+		const css = this.normalizeWebsiteCss(entryCssSource);
+		const js = this.normalizeWebsiteJs(entryJsSource);
 		const baseHref = this.getPreviewBaseHref();
 
 		return this.sanitizer.bypassSecurityTrustHtml(`<!doctype html>

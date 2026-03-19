@@ -1,7 +1,7 @@
 import { BreakpointObserver } from '@angular/cdk/layout';
 import { STEPPER_GLOBAL_OPTIONS } from '@angular/cdk/stepper';
 import { Location } from '@angular/common';
-import { Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { Component, ElementRef, EventEmitter, HostListener, Inject, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
 import { MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatAccordion } from '@angular/material/expansion';
@@ -27,6 +27,7 @@ import { MatBottomSheet } from '@angular/material/bottom-sheet';
 import { CdkDragDrop, moveItemInArray, transferArrayItem } from '@angular/cdk/drag-drop';
 import { FileUploadService } from './services/file-upload.services';
 import { HttpEventType, HttpResponse } from '@angular/common/http';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 const GIF = (window as any).GIF;
 export interface Tile {
@@ -46,7 +47,24 @@ export interface Tile {
 	websiteHtml?: string;
 	websiteCss?: string;
 	websiteJs?: string;
+	websiteFiles?: any[];
   }
+
+export interface WebsiteButtonOption {
+	index: number;
+	label: string;
+	selector: 'button' | 'div';
+	key: string;
+}
+
+interface WebsiteElementComputedStyle {
+	width?: string;
+	height?: string;
+	border?: string;
+	borderRadius?: string;
+	backgroundColor?: string;
+}
+
   export interface DialogData {
 	animal: string;
 	name: string;
@@ -76,6 +94,8 @@ export class WebsitePage implements OnInit, OnDestroy {
 	  });
 
 	@ViewChild(MatAccordion) accordion!: MatAccordion;
+	@ViewChild('websitePreviewMedia') websitePreviewMediaRef?: ElementRef<HTMLElement>;
+	@ViewChild('websiteButtonPopoverRef') websiteButtonPopoverRef?: ElementRef<HTMLElement>;
 	// _________________________ [ websiteTemplates ]
 	public selectedFiles?: FileList;
 	public currentFile?: File;
@@ -87,6 +107,28 @@ export class WebsitePage implements OnInit, OnDestroy {
 
 	public websiteSelectedTemplate = false;
 	public websiteSelectedTemplateID!: any;
+	public websiteButtonOptions: WebsiteButtonOption[] = [];
+	public selectedWebsiteButtonIndex = 0;
+	public selectedWebsiteElementSelector: 'button' | 'div' = 'button';
+	public websiteButtonLabel = '';
+	public websiteButtonTextColor = '#ffffff';
+	public websiteButtonBackgroundColor = '#1f6f8b';
+	public websiteButtonOffsetY = 0;
+	public websiteDivColor = '#ffffff';
+	public websiteDivWidth = '';
+	public websiteDivHeight = '';
+	public websiteDivBorder = '';
+	public websiteDivBorderRadius = '';
+	public websiteButtonEditorMessage = '';
+	public showWebsiteButtonPopover = false;
+	public websiteButtonPopoverX = 16;
+	public websiteButtonPopoverY = 16;
+	public isWebsiteButtonPopoverDragging = false;
+	private websiteButtonPopoverDragStartX = 0;
+	private websiteButtonPopoverDragStartY = 0;
+	private websiteButtonPopoverInitialX = 0;
+	private websiteButtonPopoverInitialY = 0;
+	private websiteElementComputedStyles: Record<string, WebsiteElementComputedStyle> = {};
 
 	websiteTemplates: websiteTemplate[] = [];
 
@@ -314,6 +356,7 @@ export class WebsitePage implements OnInit, OnDestroy {
 		private webWorkerService: WebWorkerService,
 
 		private containerService: ContainerService,
+		private sanitizer: DomSanitizer,
 	) {
 
 		this.updateComponentSubject = new BehaviorSubject<any[] | unknown>(null);
@@ -593,6 +636,7 @@ export class WebsitePage implements OnInit, OnDestroy {
 
 	private mapTemplateToWebsiteTemplate(template: Template): websiteTemplate {
 		const firstBanner: any = template.banners?.find((b: any) => b?.status !== false);
+		const websiteFiles = firstBanner?.websiteFiles || firstBanner?.websitefiles || [];
 		return {
 			id: String(template.id),
 			templateId: String(template.id),
@@ -600,14 +644,274 @@ export class WebsitePage implements OnInit, OnDestroy {
 			subtitle: this.createWebsiteTemplateField(template.client?.name || template.bannertype?.name || 'Website Template'),
 			image: this.getTemplatePreviewImage(template),
 			content: this.createWebsiteTemplateField(template.description || 'Edit this template copy and replace the image from the website editor.'),
-			websiteHtml: firstBanner?.websiteHtml || '',
-			websiteCss: firstBanner?.websiteCss || '',
-			websiteJs: firstBanner?.websiteJs || '',
+			websiteHtml: this.getWebsitePreviewEntryContent(websiteFiles, ['index.html'], '.html', firstBanner?.websiteHtml || ''),
+			websiteCss: this.getWebsitePreviewEntryContent(websiteFiles, ['css', 'style.css'], '.css', firstBanner?.websiteCss || ''),
+			websiteJs: this.getWebsitePreviewEntryContent(websiteFiles, ['js', 'main.js'], '.js', firstBanner?.websiteJs || ''),
+			websiteFiles,
 		};
 	}
 
-	public buildPreviewDocument(t: websiteTemplate): string {
-		return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${t.websiteCss || ''}</style></head><body>${t.websiteHtml || ''}<script>${t.websiteJs || ''}<\/script></body></html>`;
+	public buildPreviewDocument(t: websiteTemplate): SafeHtml {
+		const head = this.extractWebsiteHead(t.websiteHtml || '');
+		const html = this.normalizeWebsiteHtml(t.websiteHtml || '');
+		const css = this.normalizeWebsiteCss(t.websiteCss || '');
+		const js = this.normalizeWebsiteJs(t.websiteJs || '');
+		const baseHref = this.getPreviewBaseHref();
+		const editorBridgeJs = this.buildPreviewEditorBridgeScript(String(t.id || ''));
+
+		return this.sanitizer.bypassSecurityTrustHtml(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${baseHref}">${head}<style>${css}</style></head><body>${html}<script>${js}<\/script><script>${editorBridgeJs}<\/script></body></html>`);
+	}
+
+	private buildPreviewEditorBridgeScript(templateId: string): string {
+		const safeTemplateId = JSON.stringify(templateId);
+
+		return `(function(){
+			var MESSAGE_TYPE = 'website-preview-element-selected';
+			var SELECTED_CLASS = 'website-preview-element-selected';
+			var style = document.createElement('style');
+			style.textContent = '.' + SELECTED_CLASS + '{outline:2px dashed #ff7a00 !important; outline-offset:2px;}';
+			document.head.appendChild(style);
+
+			function clearSelection(){
+				document.querySelectorAll('.' + SELECTED_CLASS).forEach(function(node){
+					node.classList.remove(SELECTED_CLASS);
+				});
+			}
+
+			document.addEventListener('click', function(event){
+				var target = event.target;
+				if (!target || typeof target.closest !== 'function') {
+					return;
+				}
+
+				var activeElement = target.closest('button, div');
+				if (!activeElement) {
+					return;
+				}
+
+				if (activeElement.tagName === 'DIV') {
+					var divText = (activeElement.textContent || '').trim();
+					if (!divText) {
+						return;
+					}
+				}
+
+				var elementSelector = activeElement.tagName === 'BUTTON' ? 'button' : 'div';
+				var elements = Array.prototype.slice.call(document.querySelectorAll(elementSelector));
+				var elementIndex = elements.indexOf(activeElement);
+				if (elementIndex < 0) {
+					return;
+				}
+
+				event.preventDefault();
+				event.stopPropagation();
+				clearSelection();
+				activeElement.classList.add(SELECTED_CLASS);
+				var rect = activeElement.getBoundingClientRect();
+				var computed = window.getComputedStyle(activeElement);
+
+				if (window.parent && window.parent !== window) {
+					window.parent.postMessage({
+						type: MESSAGE_TYPE,
+						templateId: ${safeTemplateId},
+						elementType: elementSelector,
+						elementIndex: elementIndex,
+						computedStyle: {
+							width: computed.width,
+							height: computed.height,
+							border: computed.border,
+							borderRadius: computed.borderRadius,
+							backgroundColor: computed.backgroundColor
+						},
+						buttonRect: {
+							left: rect.left,
+							top: rect.top,
+							width: rect.width,
+							height: rect.height,
+							viewportWidth: window.innerWidth,
+							viewportHeight: window.innerHeight
+						}
+					}, '*');
+				}
+			}, true);
+		})();`;
+	}
+
+	public closeWebsiteButtonPopover(): void {
+		this.showWebsiteButtonPopover = false;
+		this.isWebsiteButtonPopoverDragging = false;
+	}
+
+	public getWebsiteButtonPopoverStyles(): { [key: string]: string } {
+		return {
+			left: `${this.websiteButtonPopoverX}px`,
+			top: `${this.websiteButtonPopoverY}px`,
+		};
+	}
+
+	public startWebsiteButtonPopoverDrag(event: PointerEvent): void {
+		if (!this.showWebsiteButtonPopover) {
+			return;
+		}
+
+		this.isWebsiteButtonPopoverDragging = true;
+		this.websiteButtonPopoverDragStartX = event.clientX;
+		this.websiteButtonPopoverDragStartY = event.clientY;
+		this.websiteButtonPopoverInitialX = this.websiteButtonPopoverX;
+		this.websiteButtonPopoverInitialY = this.websiteButtonPopoverY;
+		event.preventDefault();
+	}
+
+	@HostListener('window:pointermove', ['$event'])
+	public onWebsiteButtonPopoverPointerMove(event: PointerEvent): void {
+		if (!this.isWebsiteButtonPopoverDragging) {
+			return;
+		}
+
+		const deltaX = event.clientX - this.websiteButtonPopoverDragStartX;
+		const deltaY = event.clientY - this.websiteButtonPopoverDragStartY;
+		const nextX = this.websiteButtonPopoverInitialX + deltaX;
+		const nextY = this.websiteButtonPopoverInitialY + deltaY;
+		const previewWidth = this.websitePreviewMediaRef?.nativeElement?.clientWidth || 0;
+		const previewHeight = this.websitePreviewMediaRef?.nativeElement?.clientHeight || 0;
+		const popoverWidth = this.websiteButtonPopoverRef?.nativeElement?.offsetWidth || 300;
+		const popoverHeight = this.websiteButtonPopoverRef?.nativeElement?.offsetHeight || 250;
+		const maxX = Math.max(8, previewWidth - popoverWidth - 8);
+		const maxY = Math.max(8, previewHeight - popoverHeight - 8);
+
+		this.websiteButtonPopoverX = Math.max(8, Math.min(nextX, maxX));
+		this.websiteButtonPopoverY = Math.max(8, Math.min(nextY, maxY));
+	}
+
+	@HostListener('window:pointerup')
+	@HostListener('window:pointercancel')
+	public stopWebsiteButtonPopoverDrag(): void {
+		this.isWebsiteButtonPopoverDragging = false;
+	}
+
+	private getWebsitePreviewEntryContent(websiteFiles: any[], path: string[], extension: '.html' | '.css' | '.js', fallbackContent: string): string {
+		const fileNode = this.findWebsiteFileByPath(websiteFiles, path);
+
+		if (!fileNode) {
+			const extensionFallbackNode = this.findFirstWebsiteFileByExtension(websiteFiles, extension);
+			return extensionFallbackNode?.content || fallbackContent || '';
+		}
+
+		return fileNode.content || '';
+	}
+
+	private findWebsiteFileByPath(websiteFiles: any[], path: string[]): any | undefined {
+		if (!Array.isArray(websiteFiles) || websiteFiles.length === 0 || path.length === 0) {
+			return undefined;
+		}
+
+		const normalizedRows = websiteFiles.map((item: any) => ({
+			id: String(item.id),
+			parentId: item.parentId !== undefined && item.parentId !== null ? String(item.parentId) : null,
+			name: String(item.name || ''),
+			nodeType: item.nodeType,
+			content: item.content,
+		}));
+
+		const descendFromParent = (parentId: string | null, pathIndex: number): any | undefined => {
+			let currentParentId = parentId;
+			let currentNode: any;
+
+			for (let index = pathIndex; index < path.length; index++) {
+				const segment = path[index];
+				const isFile = index === path.length - 1;
+
+				currentNode = normalizedRows.find((row: any) => {
+					if (row.parentId !== currentParentId) {
+						return false;
+					}
+
+					if (row.name.toLowerCase() !== segment.toLowerCase()) {
+						return false;
+					}
+
+					return isFile ? row.nodeType === 'file' : row.nodeType === 'folder';
+				});
+
+				if (!currentNode) {
+					return undefined;
+				}
+
+				currentParentId = currentNode.id;
+			}
+
+			return currentNode;
+		};
+
+		const directMatch = descendFromParent(null, 0);
+
+		if (directMatch) {
+			return directMatch;
+		}
+
+		const rootFolderMatches = normalizedRows.filter((row: any) => row.parentId === null && row.nodeType === 'folder');
+
+		for (const rootFolder of rootFolderMatches) {
+			const wrappedMatch = descendFromParent(rootFolder.id, 0);
+
+			if (wrappedMatch) {
+				return wrappedMatch;
+			}
+		}
+
+		return undefined;
+	}
+
+	private findFirstWebsiteFileByExtension(websiteFiles: any[], extension: '.html' | '.css' | '.js'): any | undefined {
+		if (!Array.isArray(websiteFiles) || websiteFiles.length === 0) {
+			return undefined;
+		}
+
+		return websiteFiles.find((item: any) =>
+			item &&
+			item.nodeType === 'file' &&
+			typeof item.name === 'string' &&
+			item.name.toLowerCase().endsWith(extension)
+		);
+	}
+
+	private getPreviewBaseHref(): string {
+		return document?.baseURI || window?.location?.origin || '/';
+	}
+
+	private normalizeWebsiteHtml(html: string): string {
+		const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+
+		if (bodyMatch && bodyMatch[1]) {
+			return bodyMatch[1];
+		}
+
+		return html;
+	}
+
+	private extractWebsiteHead(html: string): string {
+		const headMatch = html.match(/<head[^>]*>([\s\S]*)<\/head>/i);
+
+		if (!headMatch || !headMatch[1]) {
+			return '';
+		}
+
+		return headMatch[1]
+			.replace(/<base[^>]*>/gi, '')
+			.replace(/<meta[^>]*charset[^>]*>/gi, '')
+			.replace(/<meta[^>]*name=["']viewport["'][^>]*>/gi, '');
+	}
+
+	private normalizeWebsiteCss(css: string): string {
+		return css
+			.replace(/<style[^>]*>/gi, '')
+			.replace(/<\/style>/gi, '');
+	}
+
+	private normalizeWebsiteJs(js: string): string {
+		return js
+			.replace(/<script[^>]*>/gi, '')
+			.replace(/<\/script>/gi, '');
 	}
 
 	private isWebsiteTemplate(template: Template): boolean {
@@ -829,6 +1133,344 @@ export class WebsitePage implements OnInit, OnDestroy {
 		return this.websiteTemplates.find((template) => template.id === String(id));
 	}
 
+	private parseWebsiteHtmlDocument(html: string): Document | null {
+		try {
+			return new DOMParser().parseFromString(html || '', 'text/html');
+		} catch (error) {
+			console.warn('Could not parse website html for button editing:', error);
+			return null;
+		}
+	}
+
+	private serializeWebsiteHtmlDocument(sourceHtml: string, doc: Document): string {
+		const lowerSource = (sourceHtml || '').toLowerCase();
+
+		if (lowerSource.includes('<html') || lowerSource.includes('<body')) {
+			return doc.documentElement.outerHTML;
+		}
+
+		return doc.body.innerHTML;
+	}
+
+	private normalizeColorForInput(color: string, fallback: string): string {
+		const trimmed = (color || '').trim().toLowerCase();
+
+		if (!trimmed) {
+			return fallback;
+		}
+
+		const hexMatch = trimmed.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+
+		if (hexMatch) {
+			if (hexMatch[1].length === 3) {
+				return `#${hexMatch[1].split('').map((char) => `${char}${char}`).join('')}`;
+			}
+
+			return trimmed;
+		}
+
+		const rgbMatch = trimmed.match(/^rgba?\((\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[0-9.]+)?\)$/i);
+
+		if (!rgbMatch) {
+			return fallback;
+		}
+
+		const toHex = (value: string) => Math.max(0, Math.min(255, Number(value))).toString(16).padStart(2, '0');
+		return `#${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`;
+	}
+
+	private loadWebsiteButtonEditorValues(): void {
+		if (!this.selectedTemplateData?.websiteHtml) {
+			this.websiteButtonLabel = '';
+			this.websiteButtonOffsetY = 0;
+			this.websiteDivColor = '#ffffff';
+			this.websiteDivWidth = '';
+			this.websiteDivHeight = '';
+			this.websiteDivBorder = '';
+			this.websiteDivBorderRadius = '';
+			this.websiteButtonEditorMessage = 'No website HTML found for element editing.';
+			return;
+		}
+
+		const doc = this.parseWebsiteHtmlDocument(this.selectedTemplateData.websiteHtml);
+
+		if (!doc) {
+			this.websiteButtonEditorMessage = 'Could not read editable nodes from this template.';
+			return;
+		}
+
+		const elements = Array.from(doc.querySelectorAll(this.selectedWebsiteElementSelector));
+
+		if (elements.length === 0) {
+			this.websiteButtonLabel = '';
+			this.websiteButtonOffsetY = 0;
+			this.websiteDivColor = '#ffffff';
+			this.websiteDivWidth = '';
+			this.websiteDivHeight = '';
+			this.websiteDivBorder = '';
+			this.websiteDivBorderRadius = '';
+			this.websiteButtonEditorMessage = 'No editable element found in this HTML.';
+			return;
+		}
+
+		const safeIndex = Math.max(0, Math.min(this.selectedWebsiteButtonIndex, elements.length - 1));
+		const activeElement = elements[safeIndex] as HTMLElement;
+		const topStyle = (activeElement.style.top || '').replace('px', '').trim();
+		const textColorFallback = this.selectedWebsiteElementSelector === 'button' ? '#ffffff' : '#111111';
+		const bgColorFallback = this.selectedWebsiteElementSelector === 'button' ? '#1f6f8b' : '#ffffff';
+		const elementKey = `${this.selectedWebsiteElementSelector}:${safeIndex}`;
+		const computedStyle = this.websiteElementComputedStyles[elementKey];
+		const inlineWidth = (activeElement.style.width || '').trim();
+		const inlineHeight = (activeElement.style.height || '').trim();
+		const inlineBorder = (activeElement.style.border || '').trim();
+		const inlineBorderRadius = (activeElement.style.borderRadius || '').trim();
+		const inlineBackground = (activeElement.style.backgroundColor || '').trim();
+
+		this.selectedWebsiteButtonIndex = safeIndex;
+		this.websiteButtonLabel = (activeElement.textContent || '').trim();
+		this.websiteButtonTextColor = this.normalizeColorForInput(activeElement.style.color, textColorFallback);
+		this.websiteButtonBackgroundColor = this.normalizeColorForInput(activeElement.style.backgroundColor, bgColorFallback);
+		this.websiteButtonOffsetY = Number.isNaN(Number(topStyle)) ? 0 : Number(topStyle);
+		this.websiteDivColor = this.normalizeColorForInput(computedStyle?.backgroundColor || inlineBackground, '#ffffff');
+		this.websiteDivWidth = (computedStyle?.width || inlineWidth || '').trim();
+		this.websiteDivHeight = (computedStyle?.height || inlineHeight || '').trim();
+		this.websiteDivBorder = (computedStyle?.border || inlineBorder || '').trim();
+		this.websiteDivBorderRadius = (computedStyle?.borderRadius || inlineBorderRadius || '').trim();
+		this.websiteButtonEditorMessage = '';
+	}
+
+	private refreshWebsiteButtonOptions(): void {
+		if (!this.selectedTemplateData?.websiteHtml) {
+			this.websiteButtonOptions = [];
+			this.websiteButtonEditorMessage = 'No website HTML found for element editing.';
+			return;
+		}
+
+		const doc = this.parseWebsiteHtmlDocument(this.selectedTemplateData.websiteHtml);
+
+		if (!doc) {
+			this.websiteButtonOptions = [];
+			this.websiteButtonEditorMessage = 'Could not read editable nodes from this template.';
+			return;
+		}
+
+		const buttonOptions = Array.from(doc.querySelectorAll('button')).map((button, index) => ({
+			index,
+			selector: 'button' as const,
+			key: `button:${index}`,
+			label: (button.textContent || '').trim() || `Button ${index + 1}`,
+		}));
+
+		const divOptions = Array.from(doc.querySelectorAll('div'))
+			.map((div, index) => ({
+				index,
+				selector: 'div' as const,
+				key: `div:${index}`,
+				label: (div.textContent || '').trim(),
+			}))
+			.filter((row) => row.label.length > 0)
+			.map((row, filteredIndex) => ({
+				...row,
+				label: row.label || `Div ${filteredIndex + 1}`,
+			}));
+
+		this.websiteButtonOptions = [...buttonOptions, ...divOptions];
+
+		if (this.websiteButtonOptions.length === 0) {
+			this.websiteButtonEditorMessage = 'No <button> or text <div> found in this HTML.';
+			return;
+		}
+
+		const activeOption = this.websiteButtonOptions.find((option) =>
+			option.selector === this.selectedWebsiteElementSelector && option.index === this.selectedWebsiteButtonIndex
+		);
+
+		if (!activeOption) {
+			this.selectedWebsiteElementSelector = this.websiteButtonOptions[0].selector;
+			this.selectedWebsiteButtonIndex = this.websiteButtonOptions[0].index;
+		}
+
+		this.loadWebsiteButtonEditorValues();
+	}
+
+	private applyWebsiteButtonChanges(): void {
+		if (!this.selectedTemplateData?.websiteHtml) {
+			return;
+		}
+
+		const doc = this.parseWebsiteHtmlDocument(this.selectedTemplateData.websiteHtml);
+
+		if (!doc) {
+			return;
+		}
+
+		const elements = Array.from(doc.querySelectorAll(this.selectedWebsiteElementSelector));
+		const targetElement = elements[this.selectedWebsiteButtonIndex] as HTMLElement | undefined;
+
+		if (!targetElement) {
+			return;
+		}
+
+		if (this.selectedWebsiteElementSelector === 'button') {
+			targetElement.textContent = this.websiteButtonLabel || targetElement.textContent || `${this.selectedWebsiteElementSelector} ${this.selectedWebsiteButtonIndex + 1}`;
+			targetElement.style.color = this.websiteButtonTextColor;
+			targetElement.style.backgroundColor = this.websiteButtonBackgroundColor;
+			targetElement.style.position = 'relative';
+			targetElement.style.top = `${this.websiteButtonOffsetY}px`;
+		} else {
+			targetElement.style.backgroundColor = this.websiteDivColor;
+
+			if (this.websiteDivWidth.trim()) {
+				targetElement.style.width = this.websiteDivWidth.trim();
+			} else {
+				targetElement.style.removeProperty('width');
+			}
+
+			if (this.websiteDivHeight.trim()) {
+				targetElement.style.height = this.websiteDivHeight.trim();
+			} else {
+				targetElement.style.removeProperty('height');
+			}
+
+			if (this.websiteDivBorder.trim()) {
+				targetElement.style.border = this.websiteDivBorder.trim();
+			} else {
+				targetElement.style.removeProperty('border');
+			}
+
+			if (this.websiteDivBorderRadius.trim()) {
+				targetElement.style.borderRadius = this.websiteDivBorderRadius.trim();
+			} else {
+				targetElement.style.removeProperty('border-radius');
+			}
+		}
+
+		this.selectedTemplateData.websiteHtml = this.serializeWebsiteHtmlDocument(this.selectedTemplateData.websiteHtml, doc);
+		this.refreshWebsiteButtonOptions();
+	}
+
+	public onWebsiteButtonSelectionChange(value: string): void {
+		const [selector, indexValue] = String(value).split(':');
+		const selectedIndex = Number(indexValue);
+
+		if ((selector !== 'button' && selector !== 'div') || Number.isNaN(selectedIndex)) {
+			return;
+		}
+
+		this.selectedWebsiteElementSelector = selector;
+		this.selectedWebsiteButtonIndex = selectedIndex;
+		this.loadWebsiteButtonEditorValues();
+	}
+
+	public updateWebsiteButtonLabel(value: string): void {
+		this.websiteButtonLabel = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteButtonTextColor(value: string): void {
+		this.websiteButtonTextColor = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteButtonBackgroundColor(value: string): void {
+		this.websiteButtonBackgroundColor = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteButtonOffsetY(value: string): void {
+		const offset = Number(value);
+
+		if (Number.isNaN(offset)) {
+			return;
+		}
+
+		this.websiteButtonOffsetY = offset;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public nudgeWebsiteButtonOffset(delta: number): void {
+		this.websiteButtonOffsetY += delta;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteDivColor(value: string): void {
+		this.websiteDivColor = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteDivWidth(value: string): void {
+		this.websiteDivWidth = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteDivHeight(value: string): void {
+		this.websiteDivHeight = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteDivBorder(value: string): void {
+		this.websiteDivBorder = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	public updateWebsiteDivBorderRadius(value: string): void {
+		this.websiteDivBorderRadius = value;
+		this.applyWebsiteButtonChanges();
+	}
+
+	@HostListener('window:message', ['$event'])
+	public onPreviewSelectionMessage(event: MessageEvent): void {
+		const data = event?.data;
+
+		if (!data || data.type !== 'website-preview-element-selected') {
+			return;
+		}
+
+		if (!this.selectedTemplateData) {
+			return;
+		}
+
+		if (String(data.templateId || '') !== String(this.selectedTemplateData.id || '')) {
+			return;
+		}
+
+		const selectedIndex = Number(data.elementIndex);
+		const selectedType = data.elementType === 'div' ? 'div' : 'button';
+
+		if (Number.isNaN(selectedIndex)) {
+			return;
+		}
+
+		this.selectedWebsiteElementSelector = selectedType;
+		this.selectedWebsiteButtonIndex = selectedIndex;
+
+		if (selectedType === 'div' && data.computedStyle) {
+			const computedStyle = data.computedStyle as WebsiteElementComputedStyle;
+			this.websiteElementComputedStyles[`div:${selectedIndex}`] = computedStyle;
+		}
+
+		this.loadWebsiteButtonEditorValues();
+		this.websiteButtonEditorMessage = '';
+
+		const rect = data.buttonRect;
+		if (rect) {
+			const previewWidth = Number(rect.viewportWidth) || 0;
+			const previewHeight = Number(rect.viewportHeight) || 0;
+			const popoverWidth = 300;
+			const popoverHeight = 250;
+			const preferredX = Number(rect.left) + Number(rect.width) + 12;
+			const preferredY = Number(rect.top);
+
+			this.websiteButtonPopoverX = Math.max(8, Math.min(preferredX, Math.max(8, previewWidth - popoverWidth - 8)));
+			this.websiteButtonPopoverY = Math.max(8, Math.min(preferredY, Math.max(8, previewHeight - popoverHeight - 8)));
+		} else {
+			this.websiteButtonPopoverX = 16;
+			this.websiteButtonPopoverY = 16;
+		}
+
+		this.showWebsiteButtonPopover = true;
+	}
+
 	public updateWebsiteField(field: 'title' | 'subtitle' | 'content', value: string): void {
 		if (!this.selectedTemplateData) {
 			return;
@@ -999,6 +1641,8 @@ export class WebsitePage implements OnInit, OnDestroy {
 		this.preview = selectedTemplate.image;
 		this.websiteSelectedTemplate = true;
 		this.selectedTemplateData = selectedTemplate;
+		this.showWebsiteButtonPopover = false;
+		this.refreshWebsiteButtonOptions();
 	}
 	public previewTemplate(id: any){
 		this.selectedTemplate(id);
@@ -2814,9 +3458,13 @@ export class DialogEditVariationFormComponent implements OnInit {
 	constructor(
 		public dialogRef: MatDialogRef<PreviewDialog>,
 		@Inject(MAT_DIALOG_DATA) public data: DialogData,
+		private sanitizer: DomSanitizer,
 	  ) {
 		this.websiteSelectedTemplate = data.name;
 		console.log(this.websiteSelectedTemplate.id);
+	  }
+	  public buildPreviewDocument(template: any): SafeHtml {
+		return this.sanitizer.bypassSecurityTrustHtml(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${template.websiteCss || ''}</style></head><body>${template.websiteHtml || ''}<script>${template.websiteJs || ''}<\/script></body></html>`);
 	  }
 	  onNoClick(): void {
 		this.dialogRef.close();

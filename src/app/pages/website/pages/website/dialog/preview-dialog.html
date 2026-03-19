@@ -2,7 +2,13 @@
   <div >
     <div class="websiteTemplate">
       <div class="websiteTemplate-media">
-        <img src={{websiteSelectedTemplate.image}} alt="">
+        <iframe
+          *ngIf="websiteSelectedTemplate.websiteHtml"
+          class="websiteTemplate-iframe"
+          [srcdoc]="buildPreviewDocument(websiteSelectedTemplate)"
+          title="Website template preview"
+          scrolling="no"></iframe>
+        <img *ngIf="!websiteSelectedTemplate.websiteHtml" [src]="websiteSelectedTemplate.image" alt="">
         <p>
           {{websiteSelectedTemplate.content.value}}
         </p>

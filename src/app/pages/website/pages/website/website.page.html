@@ -1,6 +1,6 @@
 <mat-toolbar class="bapp-admin-toolbar">
 	<span class="toolbar-title">
-		<span *ngIf="isAddMode">Add Creative to Template</span>
+		<span *ngIf="isAddMode">Select website template to use</span>
 		<span *ngIf="!isAddMode && template">Edit Creative</span>
 	</span>
 	<span class="example-spacer"></span>
@@ -32,16 +32,12 @@
 						*ngIf="websiteTemplate.websiteHtml"
 						class="website-template-card__iframe-preview"
 						title="{{websiteTemplate.title.value}} preview"
-						[attr.srcdoc]="buildPreviewDocument(websiteTemplate)"
+						[srcdoc]="buildPreviewDocument(websiteTemplate)"
 						scrolling="no"></iframe>
 					<img
 						*ngIf="!websiteTemplate.websiteHtml"
 						[src]="websiteTemplate.image"
 						[alt]="websiteTemplate.title.value">
-					<div class="website-template-card__overlay">
-						<h3>{{websiteTemplate.title.value}}</h3>
-						<p>{{websiteTemplate.content.value}}</p>
-					</div>
 				</button>
 				<div class="website-template-card__body">
 					<div>
@@ -55,7 +51,7 @@
 				</div>
 			</article>
 		</div>
-	  </form>
+	</form>
 	</mat-step>
 	<mat-step [stepControl]="secondFormGroup">
 	  <form [formGroup]="secondFormGroup">
@@ -63,54 +59,136 @@
 		<ng-container *ngIf="selectedTemplateData as activeTemplate; else noWebsiteTemplateSelected">
 			<div class="website-editor">
 				<section class="website-editor__preview-card">
-					<div class="website-editor__preview-media">
-						<img [src]="activeTemplate.image" [alt]="activeTemplate.title.value">
+					<div class="website-editor__preview-media" #websitePreviewMedia>
+						<iframe
+							*ngIf="activeTemplate.websiteHtml"
+							class="website-editor__iframe-preview"
+							title="{{activeTemplate.title.value}} live preview"
+							[srcdoc]="buildPreviewDocument(activeTemplate)"
+							scrolling="no"></iframe>
+						<img
+							*ngIf="!activeTemplate.websiteHtml"
+							[src]="activeTemplate.image"
+							[alt]="activeTemplate.title.value">
+
+						<div class="website-editor__button-popover" #websiteButtonPopoverRef *ngIf="showWebsiteButtonPopover" [ngStyle]="getWebsiteButtonPopoverStyles()" [class.website-editor__button-popover--dragging]="isWebsiteButtonPopoverDragging">
+							<div class="website-editor__button-popover-header" (pointerdown)="startWebsiteButtonPopoverDrag($event)">
+								<strong>Element Editor</strong>
+								<button type="button" class="website-editor__button-popover-close" (click)="closeWebsiteButtonPopover()" aria-label="Close button editor">x</button>
+							</div>
+
+							<div class="website-editor__button-popover-body">
+								<div class="website-editor__field">
+									<label>Selected Element</label>
+									<div class="website-editor__selected-element-display">
+										{{selectedWebsiteElementSelector}}: {{websiteButtonLabel || websiteDivColor}}
+									</div>
+								</div>
+
+								<ng-container *ngIf="selectedWebsiteElementSelector === 'button'; else divEditorFields">
+									<div class="website-editor__field">
+										<label for="website-template-button-label">Text</label>
+										<input
+											id="website-template-button-label"
+											type="text"
+											[value]="websiteButtonLabel"
+											(input)="updateWebsiteButtonLabel($any($event.target).value)"
+											[disabled]="websiteButtonOptions.length === 0">
+									</div>
+
+									<div class="website-editor__field website-editor__field--inline">
+										<div>
+											<label for="website-template-button-text-color">Text</label>
+											<input
+												id="website-template-button-text-color"
+												type="color"
+												[value]="websiteButtonTextColor"
+												(input)="updateWebsiteButtonTextColor($any($event.target).value)"
+												[disabled]="websiteButtonOptions.length === 0">
+										</div>
+										<div>
+											<label for="website-template-button-bg-color">Background</label>
+											<input
+												id="website-template-button-bg-color"
+												type="color"
+												[value]="websiteButtonBackgroundColor"
+												(input)="updateWebsiteButtonBackgroundColor($any($event.target).value)"
+												[disabled]="websiteButtonOptions.length === 0">
+										</div>
+									</div>
+
+									<div class="website-editor__field">
+										<div class="website-editor__offset-controls">
+											<button type="button" class="btn btn-outline-secondary" (click)="nudgeWebsiteButtonOffset(-5)" [disabled]="websiteButtonOptions.length === 0">Up</button>
+											<input
+												id="website-template-button-offset"
+												type="number"
+												[value]="websiteButtonOffsetY"
+												(input)="updateWebsiteButtonOffsetY($any($event.target).value)"
+												[disabled]="websiteButtonOptions.length === 0">
+											<button type="button" class="btn btn-outline-secondary" (click)="nudgeWebsiteButtonOffset(5)" [disabled]="websiteButtonOptions.length === 0">Down</button>
+										</div>
+									</div>
+								</ng-container>
+
+								<ng-template #divEditorFields>
+									<div class="website-editor__field">
+										<label for="website-template-div-color">Color</label>
+										<input
+											id="website-template-div-color"
+											type="color"
+											[value]="websiteDivColor"
+											(input)="updateWebsiteDivColor($any($event.target).value)"
+											[disabled]="websiteButtonOptions.length === 0">
+									</div>
+
+									<div class="website-editor__field website-editor__field--inline">
+										<div>
+											<label for="website-template-div-width">Width</label>
+											<input
+												id="website-template-div-width"
+												type="text"
+												[value]="websiteDivWidth"
+												placeholder="e.g. 220px"
+												(input)="updateWebsiteDivWidth($any($event.target).value)">
+										</div>
+										<div>
+											<label for="website-template-div-height">Height</label>
+											<input
+												id="website-template-div-height"
+												type="text"
+												[value]="websiteDivHeight"
+												placeholder="e.g. 60px"
+												(input)="updateWebsiteDivHeight($any($event.target).value)">
+										</div>
+									</div>
+
+									<div class="website-editor__field">
+										<label for="website-template-div-border">Border</label>
+										<input
+											id="website-template-div-border"
+											type="text"
+											[value]="websiteDivBorder"
+											placeholder="e.g. 1px solid #000"
+											(input)="updateWebsiteDivBorder($any($event.target).value)">
+									</div>
+
+									<div class="website-editor__field">
+										<label for="website-template-div-border-radius">Border Radius</label>
+										<input
+											id="website-template-div-border-radius"
+											type="text"
+											[value]="websiteDivBorderRadius"
+											placeholder="e.g. 12px"
+											(input)="updateWebsiteDivBorderRadius($any($event.target).value)">
+									</div>
+								</ng-template>
+							</div>
+						</div>
 					</div>
 					<div class="website-editor__preview-copy">
-						<p class="website-editor__eyebrow">{{template?.client?.name || 'Website Template'}} • {{template?.bannertype?.name || 'Website'}}</p>
-						<h2>{{activeTemplate.title.value}}</h2>
-						<h3>{{activeTemplate.subtitle.value}}</h3>
-						<p>{{activeTemplate.content.value}}</p>
-					</div>
-				</section>
-
-				<section class="website-editor__controls">
-					<div class="website-editor__section-heading">
-						<h2>Edit Content</h2>
-						<p>Update the website copy and image for the selected template.</p>
-					</div>
-
-					<div class="website-editor__field">
-						<label for="website-template-title">Headline</label>
-						<input id="website-template-title" type="text" [value]="activeTemplate.title.value" (input)="updateWebsiteField('title', $any($event.target).value)">
-					</div>
-
-					<div class="website-editor__field">
-						<label for="website-template-subtitle">Subheadline</label>
-						<input id="website-template-subtitle" type="text" [value]="activeTemplate.subtitle.value" (input)="updateWebsiteField('subtitle', $any($event.target).value)">
-					</div>
-
-					<div class="website-editor__field">
-						<label for="website-template-copy">Body Copy</label>
-						<textarea id="website-template-copy" rows="8" [value]="activeTemplate.content.value" (input)="updateWebsiteField('content', $any($event.target).value)"></textarea>
-					</div>
-
-					<div class="website-editor__field">
-						<label for="website-template-image-url">Image URL</label>
-						<input id="website-template-image-url" type="text" [value]="activeTemplate.image" (input)="updateWebsiteImageUrl($any($event.target).value)">
-					</div>
-
-					<div class="website-editor__field">
-						<label for="website-template-image-upload">Replace Image</label>
-						<input id="website-template-image-upload" type="file" accept="image/*" (change)="selectFile($event)">
-					</div>
-
-					<div class="website-editor__actions">
-						<button type="button" class="btn btn-outline-secondary" [disabled]="!selectedFiles" (click)="upload()">Upload Image</button>
-						<div class="website-editor__status" *ngIf="message || progress">
-							<span *ngIf="progress">Uploading {{progress}}%</span>
-							<span *ngIf="!progress && message">{{message}}</span>
-						</div>
+						<h3>{{activeTemplate.title.value}}</h3>
+						<p class="website-editor__hint">Click any button or text div in Live Preview to open the mini editor beside it.</p>
 					</div>
 				</section>
 			</div>

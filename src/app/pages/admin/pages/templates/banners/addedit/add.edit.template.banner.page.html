@@ -37,12 +37,70 @@
 	<div class="website-code-editor__layout" [ngClass]="{ 'website-code-editor__layout--preview-collapsed': websitePreviewCollapsed }">
 		<div class="website-code-editor__file-structure" aria-label="Website project file structure">
 			<div class="website-code-editor__file-structure-title">Project Files</div>
-			<!-- add it here  -->
+			
 			<div class="website-code-editor__file-actions">
-				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="addWebsiteFolder()">Add Folder</button>
-				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="addWebsiteFile()">Add File</button>
-				<button type="button" class="btn btn-outline-secondary btn-sm" (click)="renameWebsiteTreeNode()">Rename</button>
-				<button type="button" class="btn btn-outline-danger btn-sm" (click)="deleteWebsiteTreeNode()">Delete</button>
+				<button
+					type="button"
+					class="btn btn-outline-secondary btn-sm website-code-editor__file-action-btn"
+					aria-label="Add folder"
+					title="Add Folder"
+					(click)="addWebsiteFolder()">
+					<mat-icon>create_new_folder</mat-icon>
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline-secondary btn-sm website-code-editor__file-action-btn"
+					aria-label="Add file"
+					title="Add File"
+					(click)="addWebsiteFile()">
+					<mat-icon>note_add</mat-icon>
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline-secondary btn-sm website-code-editor__file-action-btn"
+					aria-label="Rename selected node"
+					title="Rename"
+					(click)="renameWebsiteTreeNode()">
+					<mat-icon>drive_file_rename_outline</mat-icon>
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline-danger btn-sm website-code-editor__file-action-btn"
+					aria-label="Delete selected node"
+					title="Delete"
+					(click)="deleteWebsiteTreeNode()">
+					<mat-icon>delete</mat-icon>
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline-secondary btn-sm website-code-editor__file-action-btn"
+					aria-label="Import files"
+					title="Import Files"
+					(click)="importFilesInput.click()">
+					<mat-icon>upload_file</mat-icon>
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline-secondary btn-sm website-code-editor__file-action-btn"
+					aria-label="Import folder"
+					title="Import Folder"
+					(click)="importFolderInput.click()">
+					<mat-icon>folder_open</mat-icon>
+				</button>
+				<input
+					#importFilesInput
+					type="file"
+					multiple
+					hidden
+					(change)="importWebsiteFiles($event)" />
+				<input
+					#importFolderInput
+					type="file"
+					multiple
+					hidden
+					attr.webkitdirectory=""
+					attr.directory=""
+					(change)="importWebsiteFolder($event)" />
 			</div>
 			<ul class="website-code-editor__tree">
 				<li
@@ -65,38 +123,54 @@
 				</li>
 			</ul>
 		</div>
+
+		<div class="website-code-editor__component-structure" aria-label="HTML components structure">
+			<div class="website-code-editor__file-structure-title website-code-editor__file-structure-title--components">HTML Components</div>
+			<ul class="website-code-editor__tree website-code-editor__tree--components" *ngIf="websiteHtmlComponentRows.length > 0; else noHtmlComponentsDetected">
+				<li
+					*ngFor="let row of websiteHtmlComponentRows"
+					class="website-code-editor__tree-item website-code-editor__tree-item--component"
+					[style.padding-left.px]="row.depth * 14"
+				>
+					<span class="website-code-editor__component-label">{{row.label}}</span>
+				</li>
+			</ul>
+			<ng-template #noHtmlComponentsDetected>
+				<div class="website-code-editor__components-empty">No HTML elements detected.</div>
+			</ng-template>
+		</div>
+
 		<div class="website-code-editor__panels">
-			<mat-tab-group class="website-code-editor__tabs" animationDuration="0ms" [(selectedIndex)]="selectedWebsiteEditorTab">
-				<mat-tab label="HTML">
+			<mat-tab-group
+				class="website-code-editor__tabs"
+				animationDuration="0ms"
+				*ngIf="websiteEditorTabs.length > 0"
+				[(selectedIndex)]="selectedWebsiteEditorTab"
+				(selectedIndexChange)="onWebsiteEditorTabIndexChange($event)">
+				<mat-tab *ngFor="let tab of websiteEditorTabs; let tabIndex = index">
+					<ng-template mat-tab-label>
+						<span class="website-code-editor__tab-label">{{tab.name}}</span>
+						<button
+							type="button"
+							class="website-code-editor__tab-close"
+							aria-label="Close tab"
+							(click)="closeWebsiteEditorTab(tabIndex, $event)">
+							<mat-icon>close</mat-icon>
+						</button>
+					</ng-template>
 					<div class="website-code-editor__panel">
 						<textarea
-							id="website-html-editor"
+							[id]="'website-file-editor-' + tab.nodeId"
 							class="website-code-editor__textarea"
-							[value]="websiteHtmlCode"
-							(input)="updateWebsiteCode('html', $any($event.target).value)"></textarea>
-					</div>
-				</mat-tab>
-
-				<mat-tab label="CSS">
-					<div class="website-code-editor__panel">
-						<textarea
-							id="website-css-editor"
-							class="website-code-editor__textarea"
-							[value]="websiteCssCode"
-							(input)="updateWebsiteCode('css', $any($event.target).value)"></textarea>
-					</div>
-				</mat-tab>
-
-				<mat-tab label="JavaScript">
-					<div class="website-code-editor__panel">
-						<textarea
-							id="website-js-editor"
-							class="website-code-editor__textarea website-code-editor__textarea--compact"
-							[value]="websiteJsCode"
-							(input)="updateWebsiteCode('js', $any($event.target).value)"></textarea>
+							[value]="getWebsiteEditorTabCode(tab)"
+							(input)="updateWebsiteEditorTabCode(tab, $any($event.target).value)"></textarea>
 					</div>
 				</mat-tab>
 			</mat-tab-group>
+
+			<div class="website-code-editor__tabs-empty" *ngIf="websiteEditorTabs.length === 0">
+				Click a file from Project Files to open a tab.
+			</div>
 		</div>
 
 		<div class="website-code-editor__preview" *ngIf="!websitePreviewCollapsed">
@@ -109,6 +183,45 @@
 		</div>
 	</div>
 </div>
+
+<ng-template #websiteImportConflictDialog>
+	<div class="website-code-editor__conflict-dialog">
+		<h3 class="website-code-editor__conflict-title">Import Conflict Handling</h3>
+		<p class="website-code-editor__conflict-subtitle">Choose what to do when imported files already exist.</p>
+
+		<div class="website-code-editor__conflict-list" *ngIf="websiteImportConflictPaths.length > 0">
+			<div class="website-code-editor__conflict-list-title">Conflicting files detected:</div>
+			<ul>
+				<li *ngFor="let conflictPath of websiteImportConflictPaths">{{conflictPath}}</li>
+			</ul>
+		</div>
+
+		<div class="website-code-editor__conflict-options" role="radiogroup" aria-label="Import conflict options">
+			<label class="website-code-editor__conflict-option">
+				<input type="radio" name="websiteImportConflictMode" value="replace" [(ngModel)]="websiteImportConflictSelection" />
+				<span>Replace existing files</span>
+			</label>
+			<label class="website-code-editor__conflict-option">
+				<input type="radio" name="websiteImportConflictMode" value="skip" [(ngModel)]="websiteImportConflictSelection" />
+				<span>Skip conflicting files</span>
+			</label>
+			<label class="website-code-editor__conflict-option">
+				<input type="radio" name="websiteImportConflictMode" value="ask" [(ngModel)]="websiteImportConflictSelection" />
+				<span>Ask for each conflict</span>
+			</label>
+		</div>
+
+		<label class="website-code-editor__conflict-remember">
+			<input type="checkbox" [(ngModel)]="websiteRememberImportConflictForSession" />
+			<span>Remember this choice for this session</span>
+		</label>
+
+		<div class="website-code-editor__conflict-actions">
+			<button type="button" class="btn btn-outline-secondary" (click)="cancelWebsiteImportConflictDialog()">Cancel</button>
+			<button type="button" class="btn btn-primary" (click)="confirmWebsiteImportConflictDialog()">Continue</button>
+		</div>
+	</div>
+</ng-template>
 
 <div class="row" *ngIf="!isWebsiteCreativeType() && activeBannerSizes">
 	<div class="col-12">

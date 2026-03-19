@@ -48,6 +48,11 @@ async function getAll(reqRole) {
 						required:false
 					},
 					{
+						model: db.BannerWebsiteFile,
+						as: 'websitefiles',
+						required: false
+					},
+					{
 						model: db.Container,
 						//as:'container',
 						//paranoid: false,
@@ -253,6 +258,11 @@ async function getTemplate(id) {
 						model: db.BannerType,
 						as:'bannertype',
 						required:false
+					},
+					{
+						model: db.BannerWebsiteFile,
+						as: 'websitefiles',
+						required: false
 					},
 					{
 						model: db.Container,
